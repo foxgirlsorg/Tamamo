@@ -1,0 +1,14 @@
+/data/
+/tamamo
+/tamamo.exe
+/.taste-skill/
+.codegraph/
+.idea/
+.claude/
+# Local compose setups (published in the docs, not in this repo)
+/docker-compose.yml
+/.env
+/deploy/nginx/docker-compose.yml
+/deploy/nginx/.env
+/deploy/nginx/nginx.compose.conf
+/deploy/nginx/data/
