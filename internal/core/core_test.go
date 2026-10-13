@@ -155,3 +155,47 @@ func req(remote string, hdr map[string]string) *http.Request {
 	}
 	return r
 }
+
+func TestClientIP(t *testing.T) {
+	proxies := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	cases := []struct {
+		name    string
+		remote  string
+		hdr     map[string]string
+		source  string
+		trusted []netip.Prefix
+		want    string
+	}{
+		{"remote", "203.0.113.5:1234", map[string]string{"X-Forwarded-For": "1.1.1.1"}, "remote", nil, "203.0.113.5"},
+		{"remote mapped", "[::ffff:203.0.113.5]:1234", nil, "remote", nil, "203.0.113.5"},
+		{"remote v6", "[2001:db8::1]:80", nil, "remote", nil, "2001:db8::1"},
+		{"xff untrusted peer ignored", "203.0.113.5:1", map[string]string{"X-Forwarded-For": "1.1.1.1"}, "x-forwarded-for", proxies, "203.0.113.5"},
+		{"xff trusted peer", "10.0.0.1:1", map[string]string{"X-Forwarded-For": "1.1.1.1"}, "x-forwarded-for", proxies, "1.1.1.1"},
+		{"xff skip trusted hops", "10.0.0.1:1", map[string]string{"X-Forwarded-For": "6.6.6.6, 1.1.1.1, 10.0.0.7"}, "x-forwarded-for", proxies, "1.1.1.1"},
+		{"xff all trusted", "10.0.0.1:1", map[string]string{"X-Forwarded-For": "10.0.0.9, 10.0.0.7"}, "x-forwarded-for", proxies, "10.0.0.9"},
+		{"xff empty trusted rightmost", "203.0.113.5:1", map[string]string{"X-Forwarded-For": "6.6.6.6, 1.1.1.1"}, "x-forwarded-for", nil, "1.1.1.1"},
+		{"xff garbage", "10.0.0.1:1", map[string]string{"X-Forwarded-For": "nonsense"}, "x-forwarded-for", proxies, "10.0.0.1"},
+		{"xff missing", "10.0.0.1:1", nil, "x-forwarded-for", proxies, "10.0.0.1"},
+		{"xff mapped", "10.0.0.1:1", map[string]string{"X-Forwarded-For": "::ffff:1.2.3.4"}, "x-forwarded-for", proxies, "1.2.3.4"},
+		{"x-real-ip", "10.0.0.1:1", map[string]string{"X-Real-IP": "1.2.3.4"}, "x-real-ip", proxies, "1.2.3.4"},
+		{"x-real-ip untrusted", "8.8.8.8:1", map[string]string{"X-Real-IP": "1.2.3.4"}, "x-real-ip", proxies, "8.8.8.8"},
+		{"cf", "10.0.0.1:1", map[string]string{"CF-Connecting-IP": "2001:db8::5"}, "cf-connecting-ip", proxies, "2001:db8::5"},
+		{"cf empty trusted", "8.8.8.8:1", map[string]string{"CF-Connecting-IP": "1.2.3.4"}, "cf-connecting-ip", nil, "1.2.3.4"},
+	}
+	for _, c := range cases {
+		got := ClientIP(req(c.remote, c.hdr), c.source, c.trusted)
+		if got.String() != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestClientIPMultipleXFFLines(t *testing.T) {
+	r := req("10.0.0.1:1", nil)
+	r.Header.Add("X-Forwarded-For", "6.6.6.6")
+	r.Header.Add("X-Forwarded-For", "1.1.1.1, 10.1.1.1")
+	got := ClientIP(r, "x-forwarded-for", []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
+	if got.String() != "1.1.1.1" {
+		t.Fatalf("got %s", got)
+	}
+}
