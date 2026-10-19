@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="generator" content="Tamamo">
+<meta name="referrer" content="same-origin">
+<title>{{.Title}}</title>
+{{with .Favicon}}<link rel="icon" href="{{.}}">{{end}}
+<style>{{.ThemeCSS}}</style>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html{font-size:calc(100% * var(--tm-scale));-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{
+  margin:0;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;position:relative;
+  background-color:var(--tm-bg);color:var(--tm-text);font-family:var(--tm-font);
+  font-size:1.0625rem;line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  --tm-state:var(--tm-accent);
+  --tm-msize:min(var(--tm-mascot-size), 72vw);
+  --tm-tuck:calc(var(--tm-msize) * .07 + 6px);
+  --tm-pad:clamp(24px, 6vw, 44px);
+  --tm-inner-radius:calc(var(--tm-radius) * .6);
+}
+body[data-state=success]{--tm-state:var(--tm-success)}
+body[data-state=denied],body[data-state=error]{--tm-state:var(--tm-danger)}
+[hidden]{display:none !important}
+
+/* Background textures, drawn from the border color. */
+body[data-bg=dots]{background-image:radial-gradient(circle,var(--tm-border) 1.4px,transparent 1.9px);background-size:22px 22px;background-position:11px 11px}
+body[data-bg=grid]{background-image:linear-gradient(var(--tm-border) 1px,transparent 1px),linear-gradient(90deg,var(--tm-border) 1px,transparent 1px);background-size:32px 32px;background-position:-1px -1px}
+body[data-bg=stripes]{background-image:repeating-linear-gradient(135deg,var(--tm-border) 0 1px,transparent 1px 13px)}
+.tm-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.tm-bg img{display:block;width:100%;height:100%;object-fit:cover;filter:blur(var(--tm-bg-blur));transform:scale(1.08)}
+.tm-bg::after{content:"";position:absolute;inset:0;background:var(--tm-bg);opacity:var(--tm-bg-dim)}
+
+/* Frame */
+.tm-main{position:relative;z-index:1;flex:1 0 auto;display:flex;align-items:center;justify-content:center;padding:clamp(20px,5vw,56px) 16px}
+.tm-shell{position:relative;width:100%;max-width:var(--tm-card-width);display:flex;flex-direction:column;align-items:center}
+.tm-panel{position:relative;z-index:1;width:100%;min-width:0;text-align:center}
+.tm-content{width:100%}
+body[data-align=left] .tm-panel{text-align:left}
+body[data-align=left] .tm-shell{align-items:flex-start}
+
+/* Mascot */
+.tm-figure{position:relative;z-index:0;flex:none;line-height:0;margin:0 0 1rem}
+.tm-float{display:block}
+.tm-mascot{display:block;width:var(--tm-msize);max-width:100%;height:auto;aspect-ratio:1/1;object-fit:contain;-webkit-user-drag:none;user-select:none;transform:scaleX(var(--tm-flip))}
+body{--tm-flip:1}
+body[data-mirror=on]{--tm-flip:-1}
+body[data-mascot=bottom] .tm-shell{flex-direction:column-reverse}
+body[data-mascot=bottom] .tm-figure{margin:1.25rem 0 0}
+
+/* Card: a surface. With the mascot on top (and on phones for left/right) she
+   peeks over the card's top edge; otherwise she stands on its bottom edge. */
+body[data-layout=card] .tm-shell,
+body[data-layout=card]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-panel{
+  background:var(--tm-surface);border-radius:var(--tm-radius);padding:var(--tm-pad)
+}
+body[data-layout=card][data-border=on] .tm-shell,
+body[data-layout=card][data-border=on]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-panel{border:1px solid var(--tm-border)}
+body[data-layout=card][data-shadow=on] .tm-shell,
+body[data-layout=card][data-shadow=on]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-panel{
+  box-shadow:0 1px 2px rgb(0 0 0 / .05),0 18px 40px -18px rgb(0 0 0 / .25)
+}
+body[data-layout=card]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-shell{background:none;border:0;box-shadow:none;padding:0}
+body[data-layout=card]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-figure{margin:0 0 calc(-1 * var(--tm-tuck))}
+body[data-layout=card][data-align=left]:is([data-mascot=top],[data-mascot=left],[data-mascot=right]) .tm-figure{margin-inline-start:calc(var(--tm-pad) - 8px)}
+body[data-layout=card][data-mascot=bottom] .tm-shell{padding-bottom:0;overflow:hidden}
+body[data-layout=card][data-mascot=bottom] .tm-figure{margin:1.25rem 0 calc(-1 * var(--tm-tuck))}
+
+@media (min-width:640px){
+  body[data-layout=card]:is([data-mascot=left],[data-mascot=right]) .tm-shell{
+    background:var(--tm-surface);border-radius:var(--tm-radius);padding:0 var(--tm-pad);
+    flex-direction:row;align-items:flex-end;gap:clamp(16px,4vw,36px);overflow:hidden;
+    max-width:calc(var(--tm-card-width) + var(--tm-mascot-size))
+  }
+  body[data-layout=card][data-mascot=right] .tm-shell{flex-direction:row-reverse}
+  body[data-layout=card][data-border=on]:is([data-mascot=left],[data-mascot=right]) .tm-shell{border:1px solid var(--tm-border)}
+  body[data-layout=card][data-shadow=on]:is([data-mascot=left],[data-mascot=right]) .tm-shell{box-shadow:0 1px 2px rgb(0 0 0 / .05),0 18px 40px -18px rgb(0 0 0 / .25)}
+  body[data-layout=card]:is([data-mascot=left],[data-mascot=right]) .tm-panel{
+    background:none;border:0;box-shadow:none;border-radius:0;padding:var(--tm-pad) 0;align-self:center
+  }
+  body[data-layout=card]:is([data-mascot=left],[data-mascot=right]) .tm-figure{flex:0 0 auto;width:min(var(--tm-mascot-size), 44%);margin:var(--tm-pad) 0 calc(-1 * var(--tm-tuck))}
+  body[data-layout=card]:is([data-mascot=left],[data-mascot=right]) .tm-mascot{width:100%}
+
+  body[data-layout=minimal]:is([data-mascot=left],[data-mascot=right]) .tm-shell{
+    flex-direction:row;align-items:center;gap:clamp(20px,5vw,48px);max-width:calc(var(--tm-card-width) + var(--tm-mascot-size))
+  }
+  body[data-layout=minimal][data-mascot=right] .tm-shell{flex-direction:row-reverse}
+  body[data-layout=minimal]:is([data-mascot=left],[data-mascot=right]) .tm-figure{flex:0 0 auto;width:min(var(--tm-mascot-size), 44%);margin:0}
+  body[data-layout=minimal]:is([data-mascot=left],[data-mascot=right]) .tm-mascot{width:100%}
+}
+
+/* Split: two full-height halves, the mascot on a surface-colored panel. */
+body[data-layout=split] .tm-main{padding:0;align-items:stretch}
+body[data-layout=split] .tm-shell{max-width:none;flex:1;flex-direction:column;align-items:stretch}
+body[data-layout=split][data-mascot=bottom] .tm-shell{flex-direction:column-reverse}
+body[data-layout=split] .tm-figure{
+  display:flex;align-items:flex-end;justify-content:center;margin:0;overflow:hidden;
+  background:var(--tm-surface);padding:clamp(24px,6vw,56px) 24px 0
+}
+body[data-layout=split][data-border=on] .tm-figure{border-bottom:1px solid var(--tm-border)}
+body[data-layout=split][data-border=on][data-mascot=bottom] .tm-figure{border-bottom:0;border-top:1px solid var(--tm-border)}
+body[data-layout=split] .tm-figure .tm-float{margin-bottom:calc(-1 * var(--tm-tuck))}
+body[data-layout=split] .tm-figure .tm-mascot{width:min(var(--tm-mascot-size), 80vw)}
+body[data-layout=split] .tm-panel{flex:1;display:flex;align-items:center;padding:clamp(32px,7vw,80px) clamp(20px,6vw,80px)}
+body[data-layout=split] .tm-content{max-width:var(--tm-card-width);margin:0 auto}
+body[data-layout=split][data-align=left] .tm-content{margin:0}
+@media (min-width:768px){
+  body[data-layout=split]:is([data-mascot=left],[data-mascot=right]) .tm-shell{flex-direction:row}
+  body[data-layout=split][data-mascot=right] .tm-shell{flex-direction:row-reverse}
+  body[data-layout=split]:is([data-mascot=left],[data-mascot=right]) .tm-figure{flex:0 0 50%;border:0}
+  body[data-layout=split][data-border=on][data-mascot=left] .tm-figure{border-right:1px solid var(--tm-border)}
+  body[data-layout=split][data-border=on][data-mascot=right] .tm-figure{border-left:1px solid var(--tm-border)}
+  body[data-layout=split]:is([data-mascot=left],[data-mascot=right]) .tm-figure .tm-mascot{width:min(var(--tm-mascot-size), 42vw)}
+}
+
+/* Minimal: no chrome, content floats on the background. */
+body[data-layout=minimal] .tm-figure{margin-bottom:1.25rem}
+body[data-layout=minimal][data-mascot=bottom] .tm-figure{margin:1.5rem 0 0}
+
+/* Type */
+.tm-heading{
+  margin:0 0 .625rem;font-size:clamp(1.625rem, 1.2rem + 1.9vw, 2.375rem);line-height:1.12;letter-spacing:-.022em;
+  font-weight:var(--tm-heading-weight);color:var(--tm-text);text-wrap:balance;overflow-wrap:anywhere
+}
+body:not([data-state=checking]) .tm-heading{color:var(--tm-state)}
+.tm-message{margin:0 auto;max-width:46ch;color:var(--tm-muted);font-size:1.0625rem;line-height:1.65;text-wrap:pretty;overflow-wrap:anywhere}
+body[data-align=left] .tm-message{margin:0}
+
+/* Work: progress + stats */
+.tm-work{margin-top:1.75rem;display:flex;flex-direction:column;align-items:center;gap:.875rem}
+body[data-align=left] .tm-work{align-items:flex-start}
+body[data-state=denied] .tm-work,body[data-state=error] .tm-work{display:none}
+.tm-bar{position:relative;width:100%;height:6px;border-radius:999px;background:var(--tm-border);overflow:hidden}
+.tm-bar-fill{position:absolute;inset:0;border-radius:inherit;background:var(--tm-state);transform-origin:0 50%;transform:scaleX(0);transition:transform .3s linear,background-color .3s}
+body[data-state=success] .tm-bar-fill{transform:scaleX(1)}
+.tm-ring{position:relative;width:64px;height:64px}
+.tm-ring svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}
+.tm-ring circle{fill:none;stroke-width:5}
+.tm-ring-track{stroke:var(--tm-border)}
+.tm-ring-fill{stroke:var(--tm-state);stroke-linecap:round;stroke-dasharray:169.65;stroke-dashoffset:169.65;transition:stroke-dashoffset .3s linear,stroke .3s}
+body[data-state=success] .tm-ring-fill{stroke-dashoffset:0}
+.tm-ring-pct{position:absolute;inset:0;display:grid;place-items:center;font-size:.8125rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--tm-text)}
+.tm-dots{display:flex;align-items:center;gap:8px;height:18px}
+.tm-dots span{width:9px;height:9px;border-radius:50%;background:var(--tm-state);animation:tm-dot 1.2s ease-in-out infinite both}
+.tm-dots span:nth-child(2){animation-delay:.15s}
+.tm-dots span:nth-child(3){animation-delay:.3s}
+.tm-spinner{width:32px;height:32px;border-radius:50%;border:3px solid var(--tm-border);border-top-color:var(--tm-state);animation:tm-spin .8s linear infinite}
+body[data-state=success] .tm-dots span{animation:none;opacity:1;transform:none}
+body[data-state=success] .tm-spinner{animation:none;border-color:var(--tm-success)}
+.tm-stats{margin:0;display:flex;flex-wrap:wrap;justify-content:center;gap:.25rem 1.25rem;font-size:.8125rem;line-height:1.5;color:var(--tm-muted);font-variant-numeric:tabular-nums}
+body[data-align=left] .tm-stats{justify-content:flex-start}
+.tm-stat{display:flex;gap:.375rem}
+.tm-stat dt,.tm-stat dd{margin:0}
+.tm-stat dd{color:var(--tm-text);font-weight:600}
+
+/* Actions */
+.tm-actions{margin-top:1.5rem;display:flex;flex-wrap:wrap;gap:.75rem;justify-content:center}
+body[data-align=left] .tm-actions{justify-content:flex-start}
+.tm-btn{
+  display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:.625rem 1.375rem;
+  border:0;border-radius:var(--tm-inner-radius);background:var(--tm-accent);color:var(--tm-accent-text);
+  font:inherit;font-size:1rem;font-weight:600;line-height:1.2;text-decoration:none;cursor:pointer;
+  transition:filter .15s,transform .1s
+}
+.tm-btn:hover{filter:brightness(.93)}
+.tm-btn:active{transform:translateY(1px)}
+a:focus-visible,button:focus-visible{outline:3px solid var(--tm-accent);outline-offset:3px}
+.tm-noscript{margin:1.5rem 0 0;padding:.875rem 1rem;border:1px solid var(--tm-border);border-radius:var(--tm-inner-radius);background:var(--tm-bg);color:var(--tm-text);font-size:.9375rem;line-height:1.55;text-align:left}
+.tm-footer-text{position:relative;z-index:1;margin:0;padding:12px 20px 0;font-size:.875rem;line-height:1.5;color:var(--tm-muted);text-align:center}
+body[data-credit=left] .tm-footer-text{text-align:left}
+body[data-credit=right] .tm-footer-text{text-align:right}
+.tm-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Motion */
+body[data-anim=float] .tm-float{animation:tm-float 3.6s ease-in-out infinite}
+body[data-anim=bounce] .tm-float{animation:tm-bounce 1.6s cubic-bezier(.3,0,.3,1) infinite;transform-origin:50% 100%}
+body[data-anim=wiggle] .tm-float{animation:tm-wiggle 2.8s ease-in-out infinite;transform-origin:50% 100%}
+.tm-mascot.tm-pop{animation:tm-pop .45s cubic-bezier(.2,.9,.3,1.25)}
+@keyframes tm-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4%)}}
+@keyframes tm-bounce{0%,100%{transform:translateY(0) scale(1,1)}10%{transform:translateY(0) scale(1.03,.97)}40%{transform:translateY(-6%) scale(.99,1.01)}70%{transform:translateY(0) scale(1,1)}}
+@keyframes tm-wiggle{0%,58%,100%{transform:rotate(0)}66%{transform:rotate(-3deg)}74%{transform:rotate(3deg)}82%{transform:rotate(-2deg)}90%{transform:rotate(1deg)}}
+@keyframes tm-pop{from{transform:scaleX(var(--tm-flip)) scale(.92);opacity:.35}to{transform:scaleX(var(--tm-flip));opacity:1}}
+@keyframes tm-dot{0%,80%,100%{transform:scale(.55);opacity:.45}40%{transform:scale(1);opacity:1}}
+@keyframes tm-spin{to{transform:rotate(360deg)}}
+body[data-motion=off] .tm-float,body[data-motion=off] .tm-mascot{animation:none !important}
+body[data-motion=off] .tm-btn{transition:none}
+@media (prefers-reduced-motion:reduce){
+  .tm-float,.tm-mascot{animation:none !important}
+  .tm-btn,.tm-bar-fill,.tm-ring-fill{transition:none}
+  .tm-spinner{animation-duration:1.8s}
+  .tm-dots span{animation-duration:2.4s}
+}
+</style>
+{{with .CustomCSS}}<style>{{.}}</style>{{end}}
+<style>
+html body>footer.tm-credit,html body>footer.tm-credit *{visibility:visible !important;opacity:1 !important;filter:none !important;transform:none !important}
+html body>footer.tm-credit svg{display:block !important;width:14px !important;height:14px !important;flex:none !important}
+html body>footer.tm-credit strong{display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important}
+html::before,html::after,body::before,body::after{content:none !important;display:none !important}
+</style>
+</head>
+<body data-state="{{.State}}" data-layout="{{.P.Layout}}" data-mascot="{{.P.MascotPosition}}" data-anim="{{.P.MascotAnimation}}" data-motion="{{if .P.Animations}}on{{else}}off{{end}}" data-mirror="{{if .P.MascotMirror}}on{{else}}off{{end}}" data-bg="{{.P.Background}}" data-progress="{{.P.Progress}}" data-align="{{.P.Align}}" data-border="{{if .P.CardBorder}}on{{else}}off{{end}}" data-shadow="{{if .P.CardShadow}}on{{else}}off{{end}}" data-credit="{{.P.CreditAlign}}"{{if .Script.Preview}} data-preview="on"{{end}}>
+{{with .Background}}<div class="tm-bg" aria-hidden="true"><img src="{{.}}" alt=""></div>
+{{end}}<main class="tm-main">
+<div class="tm-shell">
+{{if .P.MascotShow}}<div class="tm-figure" id="tm-figure"{{if not .Mascot}} hidden{{end}}><div class="tm-float"><img class="tm-mascot" id="tm-mascot"{{with .Mascot}} src="{{.}}"{{end}} alt="{{.Labels.MascotAlt}}" width="512" height="512" decoding="async" draggable="false"></div></div>
+{{end}}<div class="tm-panel"><div class="tm-content">
+<h1 class="tm-heading" id="tm-heading">{{.Heading}}</h1>
+<p class="tm-message" id="tm-message">{{.Message}}</p>
+<div class="tm-work" id="tm-work">
+{{- if eq .P.Progress "bar"}}
+<div class="tm-bar" id="tm-progress" role="progressbar" aria-labelledby="tm-heading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{if eq .State "success"}}100{{else}}0{{end}}"><span class="tm-bar-fill" id="tm-fill"></span></div>
+{{- else if eq .P.Progress "ring"}}
+<div class="tm-ring" id="tm-progress" role="progressbar" aria-labelledby="tm-heading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{if eq .State "success"}}100{{else}}0{{end}}"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle class="tm-ring-track" cx="32" cy="32" r="27"/><circle class="tm-ring-fill" id="tm-fill" cx="32" cy="32" r="27"/></svg>{{if .P.ShowPercent}}<span class="tm-ring-pct" id="tm-ring-pct" aria-hidden="true">{{if eq .State "success"}}100%{{else}}0%{{end}}</span>{{end}}</div>
+{{- else if eq .P.Progress "dots"}}
+<div class="tm-dots" id="tm-progress" role="progressbar" aria-labelledby="tm-heading"><span></span><span></span><span></span></div>
+{{- else if eq .P.Progress "spinner"}}
+<div class="tm-spinner" id="tm-progress" role="progressbar" aria-labelledby="tm-heading"></div>
+{{- end}}
+{{if or .P.ShowDifficulty .P.ShowHashRate .P.ShowElapsed (and .P.ShowPercent (ne .P.Progress "ring"))}}<dl class="tm-stats" id="tm-stats">
+{{- if .P.ShowDifficulty}}<div class="tm-stat"><dt>{{.Labels.Difficulty}}</dt><dd id="tm-s-difficulty">{{.Difficulty}}</dd></div>{{end}}
+{{- if .P.ShowHashRate}}<div class="tm-stat"><dt>{{.Labels.Speed}}</dt><dd id="tm-s-rate">&ndash;</dd></div>{{end}}
+{{- if .P.ShowElapsed}}<div class="tm-stat"><dt>{{.Labels.Time}}</dt><dd id="tm-s-elapsed">0.0 {{.Labels.Seconds}}</dd></div>{{end}}
+{{- if and .P.ShowPercent (ne .P.Progress "ring")}}<div class="tm-stat"><dt>{{.Labels.Progress}}</dt><dd id="tm-s-percent">{{if eq .State "success"}}100%{{else}}0%{{end}}</dd></div>{{end -}}
+</dl>{{end}}
+</div>
+<div class="tm-actions" id="tm-actions"{{if not (or (eq .State "error") (and (eq .State "success") (not .P.AutoRedirect)))}} hidden{{end}}>
+<a class="tm-btn" id="tm-retry" href=""{{if ne .State "error"}} hidden{{end}}>{{.P.RetryLabel}}</a>
+<a class="tm-btn" id="tm-continue" href="{{.Continue}}"{{if not (and (eq .State "success") (not .P.AutoRedirect))}} hidden{{end}}>{{.P.ContinueLabel}}</a>
+</div>
+<noscript><style>.tm-work{display:none !important}</style><p class="tm-noscript">{{.P.NoScript}}</p></noscript>
+<div class="tm-sr" id="tm-live" role="status" aria-live="polite" aria-atomic="true"></div>
+</div></div>
+</div>
+</main>
+{{with .P.FooterText}}<p class="tm-footer-text">{{.}}</p>
+{{end}}<script type="application/json" id="tm-data">{{.Script}}</script>
+<script src="{{.SolverURL}}" defer></script>
+<footer class="tm-credit" style="{{.CreditCSS}}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false" style="display:block !important;width:14px !important;height:14px !important"><path fill="currentColor" d="M8 1.2 2.5 3.3v4.1c0 3.3 2.3 6.2 5.5 7.4 3.2-1.2 5.5-4.1 5.5-7.4V3.3L8 1.2Zm-.9 9.6L4.6 8.3l1-1 1.5 1.5 3.3-3.3 1 1-4.3 4.3Z"/></svg><span style="display:inline !important;visibility:visible !important;opacity:1 !important;font-size:inherit !important;color:inherit !important">Protected by <strong style="display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important">Tamamo</strong></span></footer>
+</body>
+</html>
