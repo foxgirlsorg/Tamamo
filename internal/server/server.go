@@ -152,7 +152,7 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 	host := hostOnly(r.Host)
 	site := s.mgr.ForHost(host)
 	ip := core.ClientIP(r, d.cfg.Server.IPSource, d.trusted)
-	path, _, _ := strings.Cut(uri, "?")
+	path, _ := canonicalPath(uri)
 
 	dc := &decision{
 		site:   site,

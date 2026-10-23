@@ -667,6 +667,12 @@ func TestRobotsAndWellKnownAllowed(t *testing.T) {
 			t.Errorf("%s: %d", p, w.Code)
 		}
 	}
+	t.Run("traversal out of well-known", func(t *testing.T) {
+		before := e.up.count()
+		e.get("/.well-known/../admin")
+		fxCheck(t, e.up.count() != before,
+			"/.well-known/../admin is allowed by the /.well-known/* rule and proxied, although it addresses /admin (dot segments are not normalized before rule matching)")
+	})
 }
 
 // ---- stats --------------------------------------------------------------------------------
