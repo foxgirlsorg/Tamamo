@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -14,9 +15,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/tamamo/tamamo/internal/admin"
 	"github.com/tamamo/tamamo/internal/assets"
 	"github.com/tamamo/tamamo/internal/config"
 	"github.com/tamamo/tamamo/internal/server"
@@ -35,6 +38,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "check that a running Tamamo answers on its listen address, exit 0 if healthy")
 	check := flag.Bool("check", false, "validate tamamo.yaml without starting, exit 0 if it is fine")
+	setLogin := flag.String("set-login", "", "set the admin `username`; the password is read from TAMAMO_ADMIN_PASSWORD or the first line of stdin")
 	rotateSecret := flag.Bool("rotate-secret", false, "replace the signing secret (signs every visitor out) and exit")
 	flag.Parse()
 
@@ -45,8 +49,8 @@ func main() {
 	if *healthcheck {
 		os.Exit(runHealthcheck(*dataDir))
 	}
-	if *check || *rotateSecret {
-		if err := runCommand(*dataDir, *check, *rotateSecret); err != nil {
+	if *check || *setLogin != "" || *rotateSecret {
+		if err := runCommand(*dataDir, *check, *setLogin, *rotateSecret); err != nil {
 			fmt.Fprintln(os.Stderr, "tamamo:", err)
 			os.Exit(1)
 		}
@@ -63,6 +67,9 @@ func main() {
 func run(dataDir string) error {
 	mgr, err := config.Load(dataDir)
 	if err != nil {
+		return err
+	}
+	if err := applyEnvLogin(mgr); err != nil {
 		return err
 	}
 	as, err := assets.New(dataDir)
@@ -91,7 +98,7 @@ func run(dataDir string) error {
 		close(statsDone)
 	}()
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 
 	mainSrv := &http.Server{
 		Addr:              cfg.Server.Listen,
@@ -108,6 +115,52 @@ func run(dataDir string) error {
 	}()
 	slog.Info("tamamo is protecting your site", "version", Version, "url", displayURL(cfg.Server.Listen), "upstream", cfg.Server.Target, "data", dataDir)
 
+	var adminSrv *http.Server
+	var adminOnce sync.Once
+	shutdownAdmin := func() {
+		adminOnce.Do(func() {
+			if adminSrv == nil {
+				return
+			}
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = adminSrv.Shutdown(sctx)
+		})
+	}
+	if cfg.Admin.Enabled {
+		adminSrv = &http.Server{
+			Addr: cfg.Admin.Listen,
+			Handler: admin.New(admin.Options{
+				Config:             mgr,
+				Stats:              st,
+				Assets:             as,
+				Version:            Version,
+				RunningListen:      cfg.Server.Listen,
+				RunningAdminListen: cfg.Admin.Listen,
+			}),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       time.Minute,
+			WriteTimeout:      time.Minute,
+			IdleTimeout:       2 * time.Minute,
+		}
+		srv := adminSrv
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errc <- fmt.Errorf("admin API on %s: %w", cfg.Admin.Listen, err)
+			}
+		}()
+		slog.Info("admin API is listening (the optional web UI container connects here)", "url", displayURL(cfg.Admin.Listen))
+		if cfg.Admin.Username == "" || cfg.Admin.PasswordHash == "" {
+			slog.Warn("************************************************************")
+			slog.Warn("No admin login is set up yet. The FIRST person to open the web UI will be asked to create it.",
+				"url", displayURL(cfg.Admin.Listen))
+			slog.Warn("Open it now, or set it with TAMAMO_ADMIN_USERNAME / TAMAMO_ADMIN_PASSWORD or `tamamo -set-login <username>`.")
+			slog.Warn("************************************************************")
+		}
+	} else {
+		slog.Info("admin API is off; start with TAMAMO_ENABLE_API=true to use the web UI")
+	}
+
 	var runErr error
 	select {
 	case <-ctx.Done():
@@ -120,6 +173,7 @@ func run(dataDir string) error {
 	if err := mainSrv.Shutdown(sctx); err != nil {
 		slog.Warn("main server did not shut down cleanly", "err", err)
 	}
+	shutdownAdmin()
 	stopStats()
 	<-statsDone
 	return runErr
@@ -127,19 +181,34 @@ func run(dataDir string) error {
 
 // runCommand runs the one-shot command-line actions. A running Tamamo
 // picks up their changes to tamamo.yaml within a few seconds.
-func runCommand(dataDir string, check, rotate bool) error {
+func runCommand(dataDir string, check bool, login string, rotate bool) error {
 	if check {
 		if err := config.Check(dataDir); err != nil {
 			return err
 		}
 		fmt.Println(filepath.Join(dataDir, config.FileName), "is valid")
-		if !rotate {
+		if login == "" && !rotate {
 			return nil
 		}
 	}
 	mgr, err := config.Load(dataDir)
 	if err != nil {
 		return err
+	}
+	if login != "" {
+		pw := os.Getenv("TAMAMO_ADMIN_PASSWORD")
+		if pw == "" {
+			fmt.Fprint(os.Stderr, "new admin password: ")
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil && line == "" {
+				return fmt.Errorf("reading the password from stdin: %w", err)
+			}
+			pw = strings.TrimRight(line, "\r\n")
+		}
+		if err := setAdminLogin(mgr, login, pw); err != nil {
+			return err
+		}
+		fmt.Println("admin login saved for", login)
 	}
 	if rotate {
 		if err := mgr.RotateSecret(); err != nil {
@@ -148,6 +217,43 @@ func runCommand(dataDir string, check, rotate bool) error {
 		fmt.Println("signing secret replaced; every visitor has to pass the check again")
 	}
 	return nil
+}
+
+// applyEnvLogin sets the admin login from TAMAMO_ADMIN_USERNAME and
+// TAMAMO_ADMIN_PASSWORD when both are set. The stored hash is only replaced
+// when the login actually changed.
+func applyEnvLogin(mgr *config.Manager) error {
+	user, pw := os.Getenv("TAMAMO_ADMIN_USERNAME"), os.Getenv("TAMAMO_ADMIN_PASSWORD")
+	if user == "" && pw == "" {
+		return nil
+	}
+	if user == "" || pw == "" {
+		return errors.New("set both TAMAMO_ADMIN_USERNAME and TAMAMO_ADMIN_PASSWORD, or neither")
+	}
+	st := mgr.Stored()
+	if st.Admin.Username == user && admin.VerifyPassword(st.Admin.PasswordHash, pw) {
+		return nil
+	}
+	if err := setAdminLogin(mgr, user, pw); err != nil {
+		return fmt.Errorf("TAMAMO_ADMIN_USERNAME / TAMAMO_ADMIN_PASSWORD: %w", err)
+	}
+	slog.Info("admin login set from the environment", "username", user)
+	return nil
+}
+
+func setAdminLogin(mgr *config.Manager, user, pw string) error {
+	if err := admin.ValidateCredentials(user, pw); err != nil {
+		return err
+	}
+	hash, err := admin.HashPassword(pw)
+	if err != nil {
+		return err
+	}
+	return mgr.Update(func(c *config.Config) error {
+		c.Admin.Username = user
+		c.Admin.PasswordHash = hash
+		return nil
+	})
 }
 
 // displayURL turns a listen address like ":8923" into a clickable URL.
