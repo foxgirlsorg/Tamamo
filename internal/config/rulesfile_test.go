@@ -299,3 +299,45 @@ func TestHotReload(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminDomains(t *testing.T) {
+	got, err := NormalizeAdminDomains([]string{" Admin.Example.com. ", "", "*.example.org", "admin.example.com"})
+	if err != nil || !reflect.DeepEqual(got, []string{"admin.example.com", "*.example.org"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, bad := range []string{"https://a.com", "a.com:8081", "a.com/x", "a..com", "*a.com", "a.*.com", "-a.com"} {
+		if _, err := NormalizeAdminDomains([]string{bad}); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	d := []string{"admin.example.com", "*.example.org"}
+	for host, want := range map[string]bool{
+		"admin.example.com": true, "ADMIN.example.com:8081": true, "x.example.org": true, "a.b.example.org": true,
+		"example.org": false, "evil.com": false, "admin.example.com.evil.com": false, "": false,
+	} {
+		if AdminHostAllowed(d, host) != want {
+			t.Errorf("%q: want %v", host, want)
+		}
+	}
+	if !AdminHostAllowed(nil, "anything") {
+		t.Error("empty list should allow every host")
+	}
+}
+
+func TestAdminDomainEnv(t *testing.T) {
+	t.Setenv("TAMAMO_ADMIN_DOMAIN", "Admin.Example.com, ops.example.com")
+	m, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Get().Admin.Domains; !reflect.DeepEqual(got, []string{"admin.example.com", "ops.example.com"}) {
+		t.Fatalf("domains %v", got)
+	}
+	if m.Locked()["admin.domains"] != "TAMAMO_ADMIN_DOMAIN" {
+		t.Fatalf("not locked: %v", m.Locked())
+	}
+	t.Setenv("TAMAMO_ADMIN_DOMAIN", "https://bad")
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("bad env domain accepted")
+	}
+}

@@ -87,6 +87,12 @@ func New(o Options) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// admin.domains (read per request: it can change at runtime): any other
+	// Host gets an empty 404 that gives nothing away, setup included.
+	if !config.AdminHostAllowed(h.o.Config.Get().Admin.Domains, r.Host) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	hd := w.Header()
 	hd.Set("Content-Security-Policy", ContentSecurityPolicy)
 	hd.Set("X-Content-Type-Options", "nosniff")

@@ -208,11 +208,14 @@ type PageTranslation struct {
 type AdminConfig struct {
 	// Enabled reports whether the admin API runs. It is not a setting: only
 	// the TAMAMO_ENABLE_API=true environment variable turns the API on.
-	Enabled      bool   `json:"enabled" yaml:"-"`
-	Listen       string `json:"listen" yaml:"listen"`
-	Username     string `json:"username" yaml:"username"`
-	PasswordHash string `json:"password_hash,omitempty" yaml:"password_hash,omitempty"`
-	SessionHours int    `json:"session_hours" yaml:"session_hours"`
+	Enabled bool   `json:"enabled" yaml:"-"`
+	Listen  string `json:"listen" yaml:"listen"`
+	// Domains, when set, makes the admin API answer only requests whose Host
+	// is one of these names (e.g. "admin.example.com"); others get 404.
+	Domains      []string `json:"domains" yaml:"domains"`
+	Username     string   `json:"username" yaml:"username"`
+	PasswordHash string   `json:"password_hash,omitempty" yaml:"password_hash,omitempty"`
+	SessionHours int      `json:"session_hours" yaml:"session_hours"`
 }
 
 type StatsConfig struct {
@@ -329,6 +332,11 @@ func (c *Config) Validate() error {
 		a.Listen = ":8081"
 	}
 	a.SessionHours = clamp(a.SessionHours, 1, 24*90)
+	domains, err := NormalizeAdminDomains(a.Domains)
+	if err != nil {
+		return err
+	}
+	a.Domains = domains
 
 	c.Stats.RecentEvents = clamp(c.Stats.RecentEvents, 10, 2000)
 	return nil
@@ -697,6 +705,7 @@ var envOverrides = []struct{ env, key string }{
 	{"TAMAMO_ENABLE_API", "admin.enabled"},
 	{"TAMAMO_ADMIN_LISTEN", "admin.listen"},
 	{"TAMAMO_IP_SOURCE", "server.ip_source"},
+	{"TAMAMO_ADMIN_DOMAIN", "admin.domains"},
 	// The admin login itself is written by cmd/tamamo (it needs hashing);
 	// the lock only stops the web UI from changing it.
 	{"TAMAMO_ADMIN_USERNAME", "admin.login"},
@@ -716,6 +725,9 @@ func (m *Manager) applyEnv(c *Config) {
 	if v := os.Getenv("TAMAMO_IP_SOURCE"); v != "" && oneOf(v, "remote", "x-forwarded-for", "x-real-ip", "cf-connecting-ip") {
 		c.Server.IPSource = v
 	}
+	if v := os.Getenv("TAMAMO_ADMIN_DOMAIN"); v != "" {
+		c.Admin.Domains = strings.Split(v, ",")
+	}
 }
 
 func (m *Manager) publish() error {
@@ -724,6 +736,11 @@ func (m *Manager) publish() error {
 	if err := ValidateTarget(eff.Server.Target); err != nil {
 		return fmt.Errorf("TAMAMO_TARGET: %w", err)
 	}
+	domains, err := NormalizeAdminDomains(eff.Admin.Domains)
+	if err != nil {
+		return fmt.Errorf("TAMAMO_ADMIN_DOMAIN: %w", err)
+	}
+	eff.Admin.Domains = domains
 	def, sites, byID, err := buildViews(eff)
 	if err != nil {
 		return err
