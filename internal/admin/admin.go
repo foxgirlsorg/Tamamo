@@ -77,6 +77,9 @@ func New(o Options) http.Handler {
 	m.HandleFunc("POST /api/password", h.auth(h.password))
 	m.HandleFunc("POST /api/secret/rotate", h.auth(h.rotateSecret))
 	m.HandleFunc("POST /api/test", h.auth(h.testRule))
+	// rulesfile_api.go: rules in the rules.yaml file format.
+	m.HandleFunc("GET /api/rules/file", h.auth(h.getRulesFile))
+	m.HandleFunc("PUT /api/rules/file", h.auth(h.putRulesFile))
 
 	m.HandleFunc("GET /assets/img/{slot}", h.image)
 	// The preview iframe loads the checking page's scripts and mascots.
