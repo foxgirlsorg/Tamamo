@@ -558,7 +558,8 @@ func MarshalConfigYAML(c *Config) ([]byte, error) {
 		}
 		addPair(root, sec.key, n)
 	}
-	doc := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
+	annotate(root, "")
+	doc := &yaml.Node{Kind: yaml.DocumentNode, HeadComment: fileHeader, Content: []*yaml.Node{root}}
 	return encodeDoc(doc)
 }
 
@@ -585,4 +586,24 @@ func encodeDoc(doc *yaml.Node) ([]byte, error) {
 		out = append(out, l)
 	}
 	return []byte(strings.Join(out, "\n")), nil
+}
+
+// annotate puts the explanations from fileComments above their keys.
+func annotate(m *yaml.Node, path string) {
+	if m.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k, v := m.Content[i], m.Content[i+1]
+		p := k.Value
+		if path != "" {
+			p = path + "." + k.Value
+		}
+		if c, ok := fileComments[p]; ok {
+			k.HeadComment = c
+		}
+		if v.Kind == yaml.MappingNode && v.Style != yaml.FlowStyle && p != "page.translations" {
+			annotate(v, p)
+		}
+	}
 }
