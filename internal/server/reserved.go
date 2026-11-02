@@ -71,6 +71,12 @@ func (s *Server) serveReserved(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.as.Serve(w, r, strings.TrimPrefix(p, ImageURL+"/"))
+	case strings.HasPrefix(p, ModulesURL+"/"):
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			methodNotAllowed(w, "GET, HEAD")
+			return
+		}
+		s.serveModuleFile(w, r, strings.TrimPrefix(p, ModulesURL+"/"))
 	case strings.HasPrefix(p, StaticURL+"/"):
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			methodNotAllowed(w, "GET, HEAD")

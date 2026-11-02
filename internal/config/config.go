@@ -33,12 +33,15 @@ type Config struct {
 	Server ServerConfig `json:"server" yaml:"server"`
 	// Protection, Rules and Page are the global settings: they apply to the
 	// default site and to every site that doesn't override them.
-	Protection Protection  `json:"protection" yaml:"protection"`
-	Rules      []Rule      `json:"rules" yaml:"rules"`
-	Page       Page        `json:"page" yaml:"page"`
-	Sites      []Site      `json:"sites" yaml:"sites"`
-	Admin      AdminConfig `json:"admin" yaml:"admin"`
-	Stats      StatsConfig `json:"stats" yaml:"stats"`
+	Protection Protection `json:"protection" yaml:"protection"`
+	Rules      []Rule     `json:"rules" yaml:"rules"`
+	Page       Page       `json:"page" yaml:"page"`
+	Sites      []Site     `json:"sites" yaml:"sites"`
+	// Modules extend Tamamo: request checks (webhooks or compiled-in Go
+	// modules) and checking-page add-ons. See modules.go.
+	Modules []ModuleConfig `json:"modules" yaml:"modules"`
+	Admin   AdminConfig    `json:"admin" yaml:"admin"`
+	Stats   StatsConfig    `json:"stats" yaml:"stats"`
 	// Secret signs challenges and visitor passes. Never sent to the web UI.
 	Secret string `json:"secret,omitempty" yaml:"-"`
 }
@@ -326,6 +329,9 @@ func (c *Config) Validate() error {
 	if err := c.validateSites(); err != nil {
 		return err
 	}
+	if err := validateModules(c); err != nil {
+		return err
+	}
 
 	a := &c.Admin
 	if a.Listen == "" {
@@ -350,6 +356,20 @@ func (c *Config) validateSites() error {
 	ids := map[string]bool{}
 	ids[DefaultSiteID] = true
 	names := map[string]bool{}
+	// A renamed site gets a new ID; modules that still name the old ID follow it.
+	renamed := map[string]string{}
+	defer func() {
+		if len(renamed) == 0 {
+			return
+		}
+		for i := range c.Modules {
+			for j, ref := range c.Modules[i].Sites {
+				if id, ok := renamed[strings.TrimSpace(ref)]; ok {
+					c.Modules[i].Sites[j] = id
+				}
+			}
+		}
+	}()
 	for i := range c.Sites {
 		st := &c.Sites[i]
 		st.Name = strings.TrimSpace(st.Name)
@@ -384,7 +404,11 @@ func (c *Config) validateSites() error {
 		}
 		names[strings.ToLower(st.Name)] = true
 		// The ID is derived from the name, so the file never needs one.
+		oldID := st.ID
 		st.ID = uniqueID(SlugID(st.Name, "site"), ids)
+		if oldID != "" && oldID != st.ID {
+			renamed[oldID] = st.ID
+		}
 		if err := ValidateTarget(st.Target); err != nil {
 			return fmt.Errorf("site %q: %w", st.Name, err)
 		}

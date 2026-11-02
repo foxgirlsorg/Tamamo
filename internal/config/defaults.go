@@ -10,7 +10,8 @@ func Defaults() *Config {
 			TrustedProxies: []string{},
 			PreserveHost:   true,
 		},
-		Sites: []Site{},
+		Sites:   []Site{},
+		Modules: []ModuleConfig{},
 		Protection: Protection{
 			Enabled:          true,
 			Difficulty:       4,

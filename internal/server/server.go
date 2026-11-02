@@ -18,12 +18,14 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/tamamo/tamamo/internal/assets"
 	"github.com/tamamo/tamamo/internal/config"
 	"github.com/tamamo/tamamo/internal/core"
+	"github.com/tamamo/tamamo/internal/modules"
 	"github.com/tamamo/tamamo/internal/page"
 	"github.com/tamamo/tamamo/internal/stats"
 	"github.com/tamamo/tamamo/web"
@@ -57,6 +59,10 @@ type Server struct {
 	used    *usedSet
 	fails   *failLimiter
 	now     func() time.Time
+
+	dataDir  string // page modules live in dataDir/modules
+	modMu    sync.Mutex
+	modCache map[string]modules.Checker // check modules by their config JSON
 }
 
 // derived caches values computed from one config snapshot. It is rebuilt
@@ -66,6 +72,7 @@ type derived struct {
 	trusted []netip.Prefix
 	chal    *core.Signer
 	pass    *core.Signer
+	mods    []checkModule // enabled go and webhook modules, in config order
 }
 
 // New creates the handler.
@@ -84,6 +91,9 @@ func New(mgr *config.Manager, st *stats.Stats, as *assets.Store) *Server {
 		fails:   newFailLimiter(),
 		now:     time.Now,
 	}
+	if as != nil {
+		s.dataDir = as.DataDir()
+	}
 	s.proxies.server = s
 	mgr.Subscribe(func(*config.Config) { s.proxies.reset() })
 	return s
@@ -99,6 +109,7 @@ func (s *Server) state() *derived {
 		cfg:  cfg,
 		chal: core.NewSigner(cfg.Secret, purposeChallenge),
 		pass: core.NewSigner(cfg.Secret, purposePass),
+		mods: s.buildModules(cfg),
 	}
 	for _, p := range cfg.Server.TrustedProxies {
 		if pf, err := config.ParsePrefix(p); err == nil {
@@ -152,7 +163,7 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 	host := hostOnly(r.Host)
 	site := s.mgr.ForHost(host)
 	ip := core.ClientIP(r, d.cfg.Server.IPSource, d.trusted)
-	path, _ := canonicalPath(uri)
+	path, query := canonicalPath(uri)
 
 	dc := &decision{
 		site:   site,
@@ -178,7 +189,24 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 		return dc
 	}
 	action, difficulty := p.DefaultAction, p.Difficulty
-	if rule := site.Rules.Match(config.RuleRequest{
+	// Check modules run first; the first one with an opinion decides.
+	md, modName, decided := s.runModules(r, d, modules.Request{
+		Site:      site.ID,
+		Method:    method,
+		Host:      host,
+		Path:      path,
+		Query:     query,
+		UserAgent: r.UserAgent(),
+		IP:        ip,
+		Header:    r.Header,
+	})
+	if decided {
+		action = md.Action
+		dc.ev.Rule = "module:" + modName
+		if md.Difficulty > 0 {
+			difficulty = md.Difficulty
+		}
+	} else if rule := site.Rules.Match(config.RuleRequest{
 		Method:    method,
 		Host:      host,
 		Path:      path,
@@ -384,6 +412,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, d pa
 		d.Images = s.as.URLs(ImageURL)
 	}
 	d.Lang = site.Page.PickLanguage(r.Header.Get("Accept-Language"))
+	d.Modules = s.pageModules(s.state().cfg, site.ID)
 	var buf bytes.Buffer
 	if err := page.Render(&buf, site.Page, d); err != nil {
 		slog.Error("rendering page failed", "state", d.State, "err", err)

@@ -220,6 +220,9 @@ func ParseConfigYAML(data []byte) (*Config, error) {
 			}
 		}
 	}
+	if cfg.Modules == nil {
+		cfg.Modules = []ModuleConfig{}
+	}
 	if sitesNode != nil {
 		sites, err := parseSiteList(cfg, sitesNode)
 		if err != nil {
@@ -548,7 +551,7 @@ func MarshalConfigYAML(c *Config) ([]byte, error) {
 	for _, sec := range []struct {
 		key string
 		v   any
-	}{{"admin", c.Admin}, {"stats", c.Stats}} {
+	}{{"modules", modulesForFile(c)}, {"admin", c.Admin}, {"stats", c.Stats}} {
 		n, err := encodeNode(sec.v)
 		if err != nil {
 			return nil, err
@@ -606,4 +609,23 @@ func annotate(m *yaml.Node, path string) {
 			annotate(v, p)
 		}
 	}
+}
+
+// modulesForFile lists modules with their sites by name rather than ID.
+func modulesForFile(c *Config) []ModuleConfig {
+	names := map[string]string{}
+	for _, st := range c.Sites {
+		names[st.ID] = st.Name
+	}
+	out := make([]ModuleConfig, len(c.Modules))
+	for i, m := range c.Modules {
+		m.Sites = append([]string{}, m.Sites...)
+		for j, id := range m.Sites {
+			if n, ok := names[id]; ok {
+				m.Sites[j] = n
+			}
+		}
+		out[i] = m
+	}
+	return out
 }

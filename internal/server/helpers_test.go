@@ -105,6 +105,7 @@ func fxNew(t *testing.T, mutate func(c *config.Config)) *fxEnv {
 		c.Protection.CookieDomain = ""
 		c.Rules = []config.Rule{}
 		c.Sites = []config.Site{}
+		c.Modules = []config.ModuleConfig{}
 		if mutate != nil {
 			mutate(c)
 		}

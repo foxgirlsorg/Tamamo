@@ -33,6 +33,17 @@ type Data struct {
 	// Lang is the translation to show (a key of Page.Translations, usually
 	// from Page.PickLanguage); "" or an unknown code = the page's main texts.
 	Lang string
+	// Modules are page modules added to the page, in order.
+	Modules []Module
+}
+
+// Module is one page module's additions to the page.
+type Module struct {
+	Name    string
+	Head    template.HTML // inserted at the end of <head>
+	Body    template.HTML // inserted at the end of <body>, before the credit line
+	Styles  []string      // stylesheet URLs
+	Scripts []string      // script URLs (loaded with defer)
 }
 
 // Translate returns p with the translation lang merged over its texts (empty
@@ -147,6 +158,7 @@ type view struct {
 	Difficulty int
 	CreditCSS  template.CSS
 	Script     script
+	Modules    []Module
 	Labels     config.Labels
 }
 
@@ -248,6 +260,7 @@ func Render(w io.Writer, p *config.Page, d Data) error {
 		SolverURL:  static + "/solver.js",
 		Difficulty: diff,
 		CreditCSS:  template.CSS(creditCSS(p)),
+		Modules:    d.Modules,
 		Labels:     config.DefaultLabels().Over(p.Labels),
 		Script: script{
 			State: state, Preview: d.Preview, Host: host,

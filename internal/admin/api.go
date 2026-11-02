@@ -226,6 +226,8 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request, _ ctxSession) 
 		State string       `json:"state"`
 		// Lang shows one of the page's translations ("" = main texts).
 		Lang string `json:"lang"`
+		// Site picks whose page modules are shown ("" = the default site).
+		Site string `json:"site"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -254,6 +256,10 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request, _ ctxSession) 
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("the page has no %q translation", req.Lang))
 		return
 	}
+	site := req.Site
+	if site == "" {
+		site = config.DefaultSiteID
+	}
 	host := r.Host
 	if hst, _, err := net.SplitHostPort(host); err == nil {
 		host = hst
@@ -277,6 +283,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request, _ ctxSession) 
 		StaticURL:  "/assets/challenge",
 		Images:     images,
 		Lang:       lang,
+		Modules:    chpage.LoadModules(cfg.Modules, site, h.modulesDir(), previewModulesURL),
 	}
 	if req.State == "error" {
 		data.Message = ""

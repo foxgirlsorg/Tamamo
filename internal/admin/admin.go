@@ -80,8 +80,12 @@ func New(o Options) http.Handler {
 	// rulesfile_api.go: rules in the rules.yaml file format.
 	m.HandleFunc("GET /api/rules/file", h.auth(h.getRulesFile))
 	m.HandleFunc("PUT /api/rules/file", h.auth(h.putRulesFile))
+	// modules_api.go: available modules.
+	m.HandleFunc("GET /api/modules", h.auth(h.listModules))
 
 	m.HandleFunc("GET /assets/img/{slot}", h.image)
+	// modules_api.go: page modules' files for the checking-page preview.
+	m.HandleFunc("GET /assets/modules/", h.moduleFile)
 	// The preview iframe loads the checking page's scripts and mascots.
 	m.HandleFunc("GET /assets/challenge/", h.static)
 	m.HandleFunc("GET /assets/mascot/", h.static)

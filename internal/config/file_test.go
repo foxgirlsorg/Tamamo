@@ -66,15 +66,16 @@ func TestFileRoundTripSites(t *testing.T) {
 	c.Sites[0].Protection.Difficulty = 6
 	c.Sites[0].Page.Title = "Blog check"
 	c.Sites[0].Page.Language = "de"
+	c.Modules = []ModuleConfig{{Name: "m", Enabled: true, Type: ModuleGo, Module: "ratelimit", Sites: []string{"My Blog"}}}
 	c = mustValid(t, c)
-	if c.Sites[0].ID != "my-blog" {
-		t.Fatalf("id: %q", c.Sites[0].ID)
+	if c.Sites[0].ID != "my-blog" || c.Modules[0].Sites[0] != "my-blog" {
+		t.Fatalf("ids: %q %v", c.Sites[0].ID, c.Modules[0].Sites)
 	}
 	back, y := roundTrip(t, c)
 	if asJSON(c) != asJSON(back) {
 		t.Fatalf("round trip changed the config:\n%s", y)
 	}
-	for _, want := range []string{"- name: My Blog", "difficulty: 6", "title: Blog check", "language: de", "uk: off", "title: Минутку"} {
+	for _, want := range []string{"- name: My Blog", "difficulty: 6", "title: Blog check", "language: de", "uk: off", "title: Минутку", "- My Blog"} {
 		if !strings.Contains(y, want) {
 			t.Errorf("file lacks %q:\n%s", want, y)
 		}

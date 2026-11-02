@@ -86,6 +86,22 @@ func TestPickLanguage(t *testing.T) {
 	}
 }
 
+func TestPageModulesRender(t *testing.T) {
+	p := config.DefaultPage()
+	d := data("checking")
+	d.Modules = []Module{{Name: "m", Head: `<meta name="m-head">`, Body: `<p id="m-body">hi</p>`,
+		Styles: []string{"/.tamamo/modules/m/style.css?v=1"}, Scripts: []string{"/.tamamo/modules/m/script.js?v=1"}}}
+	html := render(t, &p, d)
+	h, b, _ := strings.Cut(html, "</head>")
+	if !strings.Contains(h, `<meta name="m-head">`) || !strings.Contains(h, `href="/.tamamo/modules/m/style.css?v=1"`) ||
+		!strings.Contains(h, `<script src="/.tamamo/modules/m/script.js?v=1" defer>`) {
+		t.Error("head additions missing")
+	}
+	if i, j := strings.Index(b, `id="m-body"`), strings.Index(b, credit); i < 0 || j < i {
+		t.Error("body addition must precede the credit line")
+	}
+}
+
 func TestLabels(t *testing.T) {
 	p := config.DefaultPage()
 	p.ShowDifficulty, p.ShowHashRate, p.ShowElapsed, p.ShowPercent, p.Progress = true, true, true, true, "bar"

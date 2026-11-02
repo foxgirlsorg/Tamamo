@@ -172,6 +172,7 @@ a:focus-visible,button:focus-visible{outline:3px solid var(--tm-accent);outline-
 .tm-footer-text{position:relative;z-index:1;margin:0;padding:12px 20px 0;font-size:.875rem;line-height:1.5;color:var(--tm-muted);text-align:center}
 body[data-credit=left] .tm-footer-text{text-align:left}
 body[data-credit=right] .tm-footer-text{text-align:right}
+.tm-module{position:relative;z-index:1}
 .tm-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 /* Motion */
@@ -195,7 +196,10 @@ body[data-motion=off] .tm-btn{transition:none}
 }
 </style>
 {{with .CustomCSS}}<style>{{.}}</style>{{end}}
-<style>
+{{range .Modules}}{{range .Styles}}<link rel="stylesheet" href="{{.}}">
+{{end}}{{range .Scripts}}<script src="{{.}}" defer></script>
+{{end}}{{.Head}}
+{{end}}<style>
 html body>footer.tm-credit,html body>footer.tm-credit *{visibility:visible !important;opacity:1 !important;filter:none !important;transform:none !important}
 html body>footer.tm-credit svg{display:block !important;width:14px !important;height:14px !important;flex:none !important}
 html body>footer.tm-credit strong{display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important}
@@ -239,6 +243,7 @@ html::before,html::after,body::before,body::after{content:none !important;displa
 {{with .P.FooterText}}<p class="tm-footer-text">{{.}}</p>
 {{end}}<script type="application/json" id="tm-data">{{.Script}}</script>
 <script src="{{.SolverURL}}" defer></script>
-<footer class="tm-credit" style="{{.CreditCSS}}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false" style="display:block !important;width:14px !important;height:14px !important"><path fill="currentColor" d="M8 1.2 2.5 3.3v4.1c0 3.3 2.3 6.2 5.5 7.4 3.2-1.2 5.5-4.1 5.5-7.4V3.3L8 1.2Zm-.9 9.6L4.6 8.3l1-1 1.5 1.5 3.3-3.3 1 1-4.3 4.3Z"/></svg><span style="display:inline !important;visibility:visible !important;opacity:1 !important;font-size:inherit !important;color:inherit !important">Protected by <strong style="display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important">Tamamo</strong></span></footer>
+{{range .Modules}}{{if .Body}}<div class="tm-module" data-module="{{.Name}}">{{.Body}}</div>
+{{end}}{{end}}<footer class="tm-credit" style="{{.CreditCSS}}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false" style="display:block !important;width:14px !important;height:14px !important"><path fill="currentColor" d="M8 1.2 2.5 3.3v4.1c0 3.3 2.3 6.2 5.5 7.4 3.2-1.2 5.5-4.1 5.5-7.4V3.3L8 1.2Zm-.9 9.6L4.6 8.3l1-1 1.5 1.5 3.3-3.3 1 1-4.3 4.3Z"/></svg><span style="display:inline !important;visibility:visible !important;opacity:1 !important;font-size:inherit !important;color:inherit !important">Protected by <strong style="display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important">Tamamo</strong></span></footer>
 </body>
 </html>
