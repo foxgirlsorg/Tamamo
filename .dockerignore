@@ -1,0 +1,9 @@
+data/
+art/
+*.png
+!web/mascot/*.png
+.git/
+.taste-skill/
+Dockerfile
+docker-compose.yml
+README.md
