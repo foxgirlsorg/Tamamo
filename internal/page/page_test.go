@@ -231,7 +231,7 @@ func TestPreviewFlag(t *testing.T) {
 	}
 }
 
-const artCreditLink = `<a href="https://t.me/tr1flu0r1d3_exe_art" target="_blank" rel="noopener noreferrer">tr1flu0r1d3.exe</a>`
+const artCreditLink = `<a href="https://t.me/KiwiCR2" target="_blank" rel="noopener noreferrer">Kiwi CR2</a>`
 
 // artCreditInFooter is the art part inside the footer: after "Protected by
 // Tamamo", separated by a middle dot, and nothing after it but </footer>.
@@ -248,7 +248,7 @@ func TestMascotArtCredit(t *testing.T) {
 				html := render(t, &p, d)
 
 				want := withCredit && show
-				if got := strings.Contains(html, "tr1flu0r1d3.exe"); got != want {
+				if got := strings.Contains(html, "Kiwi CR2"); got != want {
 					t.Fatalf("credit=%v show=%v state=%s: art credit present=%v, want %v",
 						withCredit, show, state, got, want)
 				}

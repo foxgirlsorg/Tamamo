@@ -92,7 +92,7 @@ Tests: `go test ./...`. A module example lives in `examples/hello`.
 ## Credits
 
 - Made by [foxgirls.org](https://foxgirls.org).
-- The mascot is **Eru**, the foxgirls.org mascot. Art by [tr1flu0r1d3.exe](https://t.me/tr1flu0r1d3_exe_art).
+- The mascot is **Eru**, the foxgirls.org mascot. Art by [Kiwi CR2](https://t.me/KiwiCR2).
 - Inspired by [Anubis](https://github.com/TecharoHQ/anubis) by Techaro (MIT). Several tests are adapted from its test suite.
 
 ---
