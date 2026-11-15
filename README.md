@@ -78,7 +78,7 @@ Without Compose the backend runs alone, with no web UI (publish only the site po
 ```bash
 docker run -d -p 8923:8923 \
   -e TAMAMO_TARGET=http://host.docker.internal:3000 \
-  -v "$(pwd)/data:/data" tamamo/tamamo:latest
+  -v "$(pwd)/data:/data" ghcr.io/foxgirlsorg/tamamo:latest
 ```
 
 ### 🧩 Compose
@@ -90,7 +90,7 @@ There are two ready compose files, published with the docs (`docs/docs/public/co
 | `docker-compose.yml` | `tamamo` (+ an example `app`) | `data/tamamo.yaml` only; the admin API is off |
 | `docker-compose.webui.yml` | `tamamo`, `webui` (+ `app`) | the web UI at `:8081`, or `data/tamamo.yaml` |
 
-Both use the public images `tamamo/tamamo` and `tamamo/tamamo-webui`. In the web UI version `tamamo` runs with `TAMAMO_ENABLE_API=true`; its admin API listens on `8081` **inside the compose network only**. The `webui` container sends `/api` to `http://tamamo:8081` by default and resolves the name through Docker's DNS on every request, so it needs no configuration and survives the backend being recreated. Set `TAMAMO_API` on it only if you rename the service.
+Both use the public images `ghcr.io/foxgirlsorg/tamamo` and `ghcr.io/foxgirlsorg/tamamo-webui`. In the web UI version `tamamo` runs with `TAMAMO_ENABLE_API=true`; its admin API listens on `8081` **inside the compose network only**. The `webui` container sends `/api` to `http://tamamo:8081` by default and resolves the name through Docker's DNS on every request, so it needs no configuration and survives the backend being recreated. Set `TAMAMO_API` on it only if you rename the service.
 
 Switching between them keeps everything: both use the same `./data` folder and the web UI writes the same `tamamo.yaml`.
 
