@@ -6,7 +6,7 @@
 
 **A proof-of-work gate that keeps scrapers and AI crawlers off your site.**
 
-[![Docs](https://img.shields.io/badge/Docs-Tamamo--docs-de6161?style=flat-square)](https://foxgirlsorg.github.io/Tamamo-docs/)
+[![Docs](https://img.shields.io/badge/Docs-Tamamo--docs-de6161?style=flat-square)](https://tamamo.foxgirls.org/)
 [![Image](https://img.shields.io/badge/Image-ghcr.io-de6161?style=flat-square&logo=docker&logoColor=white)](https://github.com/foxgirlsorg/Tamamo/pkgs/container/tamamo)
 [![Telegram](https://img.shields.io/badge/Telegram-@foxgirlsorg-de6161?style=flat-square&logo=telegram&logoColor=white)](https://t.me/foxgirlsorg)
 [![Website](https://img.shields.io/badge/Website-foxgirls.org-de6161?style=flat-square)](https://foxgirls.org)
@@ -18,7 +18,7 @@
 
 Tamamo sits in front of your website and asks every browser to prove it is a real browser before letting it in. People see a short "checking your browser" page once and then browse normally. Scrapers that hammer your site pay for every page.
 
-This repo is the Go backend. It runs on its own. The admin web UI is an optional second container: [Tamamo-webui](https://github.com/foxgirlsorg/Tamamo-webui). Full documentation: [Tamamo-docs](https://foxgirlsorg.github.io/Tamamo-docs/).
+This repo is the Go backend. It runs on its own. The admin web UI is an optional second container: [Tamamo-webui](https://github.com/foxgirlsorg/Tamamo-webui). Full documentation: [Tamamo-docs](https://tamamo.foxgirls.org/).
 
 ## Features
 
@@ -41,7 +41,7 @@ This repo is the Go backend. It runs on its own. The admin web UI is an optional
 
 ## Quick start
 
-Download a compose file from the docs ([Installation](https://foxgirlsorg.github.io/Tamamo-docs/guide/installation)) into an empty folder, then:
+Download a compose file from the docs ([Installation](https://tamamo.foxgirls.org/guide/installation)) into an empty folder, then:
 
 ```bash
 mkdir data
@@ -75,7 +75,7 @@ TAMAMO_TARGET=http://localhost:3000 ./tamamo -data ./data
 
 Everything lives in `data/tamamo.yaml`: sites, rules, protection, the checking page and server settings. The web UI writes the same file, so you can switch between them at any time. The admin API, and with it the web UI, only runs while `TAMAMO_ENABLE_API=true`.
 
-See the docs for each section: [configuration](https://foxgirlsorg.github.io/Tamamo-docs/config/), [environment variables](https://foxgirlsorg.github.io/Tamamo-docs/reference/environment), [behind nginx, Caddy or Traefik](https://foxgirlsorg.github.io/Tamamo-docs/guides/reverse-proxy) and [writing modules](https://foxgirlsorg.github.io/Tamamo-docs/modules/).
+See the docs for each section: [configuration](https://tamamo.foxgirls.org/config/), [environment variables](https://tamamo.foxgirls.org/reference/environment), [behind nginx, Caddy or Traefik](https://tamamo.foxgirls.org/guides/reverse-proxy) and [writing modules](https://tamamo.foxgirls.org/modules/).
 
 ## Development
 
@@ -98,5 +98,5 @@ Tests: `go test ./...`. A module example lives in `examples/hello`.
 ---
 
 <div align="center">
-  <sub>© 2026 foxgirls.org &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; <a href="https://foxgirls.org">foxgirls.org</a></sub>
+  <sub>© 2026 <a href="https://foxgirls.org">foxgirls.org</a> &nbsp;·&nbsp; MIT License</sub>
 </div>
