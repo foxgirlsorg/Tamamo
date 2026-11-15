@@ -71,7 +71,7 @@ func main() {
 	var with deps
 	flag.Var(&with, "with", "Go `module` to compile in: path[@version][=local folder]. Repeat for more.")
 	out := flag.String("o", defaultOutput(), "where to write the binary")
-	core := flag.String("tamamo", "", "Tamamo `version` to build (e.g. v0.2.0 or a commit), or a folder with its source. Default: the latest release")
+	core := flag.String("tamamo", "", "Tamamo `version` to build (e.g. v1.0.0 or a commit), or a folder with its source. Default: the latest release")
 	keep := flag.Bool("keep", false, "keep the temporary build folder and print where it is")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "tamamo-build builds tamamo with extra modules compiled in.")

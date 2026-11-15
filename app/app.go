@@ -44,7 +44,7 @@ import (
 )
 
 // Version is the release version, reported by -version and the admin API.
-const Version = "0.2.0"
+const Version = "1.0.0"
 
 // Main runs tamamo with the command line of the process and exits when it
 // is done.
