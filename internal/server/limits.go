@@ -104,3 +104,57 @@ func (f *failLimiter) fail(ip netip.Addr, now time.Time) {
 	}
 	f.m[k]++
 }
+
+// banList holds the clients the honeypot banned, by client network (IPv6 by
+// /64, as in limiterKey), until their ban expires. It lives in memory: a
+// restart lifts every ban.
+type banList struct {
+	mu        sync.Mutex
+	m         map[netip.Addr]time.Time // client network -> end of the ban
+	lastSweep time.Time
+}
+
+const maxBans = 100_000
+
+func newBanList() *banList { return &banList{m: map[netip.Addr]time.Time{}} }
+
+// banned reports whether ip is banned at now.
+func (b *banList) banned(ip netip.Addr, now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	until, ok := b.m[limiterKey(ip)]
+	return ok && now.Before(until)
+}
+
+// ban bans ip until until. A longer ban already in place is kept. When the
+// list is full, expired bans are dropped first, then the bans ending soonest.
+func (b *banList) ban(ip netip.Addr, until, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	k := limiterKey(ip)
+	if cur, ok := b.m[k]; ok {
+		if until.After(cur) {
+			b.m[k] = until
+		}
+		return
+	}
+	if len(b.m) >= maxBans || now.Sub(b.lastSweep) > time.Hour {
+		b.lastSweep = now
+		for a, u := range b.m {
+			if !now.Before(u) {
+				delete(b.m, a)
+			}
+		}
+		for len(b.m) >= maxBans {
+			var first netip.Addr
+			var end time.Time
+			for a, u := range b.m {
+				if end.IsZero() || u.Before(end) {
+					first, end = a, u
+				}
+			}
+			delete(b.m, first)
+		}
+	}
+	b.m[k] = until
+}

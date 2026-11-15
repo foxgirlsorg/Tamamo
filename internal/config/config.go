@@ -103,6 +103,8 @@ type Protection struct {
 	// VerifiedBots checks that a visitor calling itself Googlebot, Bingbot
 	// and so on really comes from that search engine.
 	VerifiedBots VerifiedBots `json:"verified_bots" yaml:"verified_bots"`
+	// Honeypot bans visitors who open one of its trap paths.
+	Honeypot Honeypot `json:"honeypot" yaml:"honeypot"`
 
 	// Checks that run before the rules, in this order: bypass headers, the
 	// rate limit, webhooks. Modules come after them, then the rules.
@@ -117,6 +119,17 @@ type VerifiedBots struct {
 	// Action is what happens to a visitor that only claims to be one of the
 	// crawlers: "block" or "challenge".
 	Action string `json:"action" yaml:"action"`
+}
+
+// Honeypot lists trap paths: pages no real visitor opens, such as
+// /wp-login.php on a site without WordPress. Whoever opens one is banned by
+// IP address (IPv6 by /64) on every site whose honeypot is on.
+type Honeypot struct {
+	Enabled bool     `json:"enabled" yaml:"enabled"`
+	Paths   []string `json:"paths" yaml:"paths"` // patterns as in rules
+	// BanHours is how long a ban lasts; 0 means as long as a pass
+	// (pass_hours).
+	BanHours int `json:"ban_hours" yaml:"ban_hours"`
 }
 
 // BypassHeader lets requests that carry a secret header through unchecked,
@@ -629,6 +642,23 @@ func validateProtection(p *Protection) error {
 	}
 	p.UnprotectedPaths = paths
 
+	hp := &p.Honeypot
+	traps := []string{}
+	for _, v := range hp.Paths {
+		if v = strings.TrimSpace(v); v == "" || slices.Contains(traps, v) {
+			continue
+		}
+		if _, err := compilePattern(v, true, false); err != nil {
+			return fmt.Errorf("honeypot path %q: %v", v, err)
+		}
+		traps = append(traps, v)
+	}
+	if len(traps) > 500 {
+		return errors.New("too many honeypot paths (at most 500)")
+	}
+	hp.Paths = traps
+	hp.BanHours = clamp(hp.BanHours, 0, 24*365)
+
 	from := []string{}
 	for _, v := range p.AcceptPassesFrom {
 		if v = strings.TrimSpace(v); v != "" && !slices.Contains(from, v) {
@@ -870,6 +900,18 @@ type SiteView struct {
 	// SharesPass is true when another site accepts this site's passes.
 	SharesPass  bool
 	unprotected []matcher
+	traps       []matcher // protection.honeypot.paths, when the honeypot is on
+}
+
+// Trap reports whether path is one of the site's honeypot paths. It is
+// always false while the site's honeypot is off.
+func (v *SiteView) Trap(path string) bool {
+	for _, m := range v.traps {
+		if m(path) {
+			return true
+		}
+	}
+	return false
 }
 
 // Unprotected reports whether path is one of the site's unprotected paths.
@@ -949,6 +991,15 @@ func buildViews(c *Config) (*SiteView, []*SiteView, map[string]*SiteView, error)
 				return nil, nil, nil, err
 			}
 			v.unprotected = append(v.unprotected, m)
+		}
+		if hp := v.Protection.Honeypot; hp.Enabled {
+			for _, p := range hp.Paths {
+				m, err := compilePattern(p, true, false)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				v.traps = append(v.traps, m)
+			}
 		}
 		for _, name := range v.Protection.AcceptPassesFrom {
 			for _, from := range all {

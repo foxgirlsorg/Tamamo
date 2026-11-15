@@ -72,6 +72,7 @@ type Server struct {
 	proxies *proxyCache
 	used    *usedSet
 	fails   *failLimiter
+	bans    *banList // clients banned by the honeypot
 	now     func() time.Time
 
 	bots       *checks.BotVerifier
@@ -105,6 +106,7 @@ func New(mgr *config.Manager, st *stats.Stats, as *assets.Store) *Server {
 		proxies: newProxyCache(),
 		used:    newUsedSet(),
 		fails:   newFailLimiter(),
+		bans:    newBanList(),
 		now:     time.Now,
 		bots:    checks.NewBotVerifier(nil),
 	}
@@ -225,6 +227,12 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 		dc.outcome = outAllow
 		return dc
 	}
+	// The honeypot comes before everything else, unprotected paths included:
+	// a banned client gets nothing from a site whose honeypot is on.
+	if p.Honeypot.Enabled && s.honeypot(dc, path, uri) {
+		dc.outcome = outBlock
+		return dc
+	}
 	// Unprotected paths skip everything. A path that can be read two ways
 	// must be unprotected in both readings.
 	if site.HasUnprotected() && site.Unprotected(path) && site.Unprotected(literalPath(uri)) {
@@ -298,6 +306,37 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 		}
 	}
 	return dc
+}
+
+// honeypot reports whether the request must be refused by the site's
+// honeypot: the client is banned, or this request opens a trap path and bans
+// it. Clients whose address is unknown or is one of server.trusted_proxies
+// are never banned: that would ban every visitor behind the proxy.
+func (s *Server) honeypot(dc *decision, path, uri string) bool {
+	ip := dc.ip
+	if !ip.IsValid() {
+		return false
+	}
+	for _, pf := range dc.d.trusted {
+		if pf.Contains(ip.Unmap()) {
+			return false
+		}
+	}
+	now := s.now()
+	if s.bans.banned(ip, now) {
+		dc.ev.Rule = "honeypot ban"
+		return true
+	}
+	if !dc.site.Trap(path) && !dc.site.Trap(literalPath(uri)) {
+		return false
+	}
+	hours := dc.site.Protection.Honeypot.BanHours
+	if hours <= 0 {
+		hours = dc.site.Protection.PassHours
+	}
+	s.bans.ban(ip, now.Add(time.Duration(hours)*time.Hour), now)
+	dc.ev.Rule = "honeypot"
+	return true
 }
 
 // validPass reports whether the request carries an unexpired pass cookie for

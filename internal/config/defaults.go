@@ -26,6 +26,7 @@ func Defaults() *Config {
 			UnprotectedPaths: []string{},
 			AcceptPassesFrom: []string{},
 			VerifiedBots:     VerifiedBots{Enabled: false, Action: ActionBlock},
+			Honeypot:         Honeypot{Enabled: false, Paths: []string{}},
 			BypassHeaders:    []BypassHeader{},
 			RateLimit: RateLimit{
 				Enabled:       false,

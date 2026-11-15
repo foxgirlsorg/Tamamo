@@ -38,6 +38,8 @@ var fileComments = map[string]string{
 	"protection.accept_passes_from": "Sites whose visitors need no second check here, by name. For an API on\nanother domain than its website: the page asks /.tamamo/api/pass for a\ntoken and sends it to the API in the X-Tamamo-Pass header.",
 	"protection.verified_bots":      "Check by reverse DNS that a visitor calling itself Googlebot, Bingbot,\nYandex, Baiduspider, Applebot, PetalBot or MojeekBot really is one.\nFakes get the action: block or challenge.",
 
+	"protection.honeypot": "Trap pages no real visitor opens. Whoever opens one is banned by IP\naddress on every site with the honeypot on, for ban_hours (0 = as long as\na pass, pass_hours). Patterns as in rules, e.g.\n  {enabled: true, paths: [/wp-login.php, /.env], ban_hours: 0}",
+
 	"protection.bypass_headers": "Requests carrying one of these secret headers skip every check, e.g. an\nuptime monitor:\n  - {name: Monitor, header: X-Monitor-Token, value: a-long-random-secret}",
 	"protection.rate_limit":     "Limit how many requests one IP address may make. Past the limit the\naction applies: block or challenge.",
 	"protection.webhooks":       "Ask your own server about each request before the rules run. It gets a\nJSON POST and answers {\"action\": \"allow\" | \"challenge\" | \"block\" | \"\"}.\n  - {name: Reputation, enabled: true, url: http://checker:9000/check}",
