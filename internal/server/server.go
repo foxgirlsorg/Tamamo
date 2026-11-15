@@ -5,7 +5,9 @@
 // It can also sit beside nginx instead of in front of the site: nginx asks
 // GET /.tamamo/auth (auth_request) for every request, and on 401/403 sends the
 // visitor to Tamamo with "X-Tamamo-Render: 1" to get the challenge or denied
-// page. In that mode Tamamo never proxies.
+// page. In that mode Tamamo never proxies. Caddy (forward_auth) and Traefik
+// (ForwardAuth) ask GET /.tamamo/forward-auth instead, which answers with the
+// page itself.
 package server
 
 import (
@@ -22,13 +24,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
-	"github.com/tamamo/tamamo/internal/modules"
-	"github.com/tamamo/tamamo/internal/page"
-	"github.com/tamamo/tamamo/internal/stats"
-	"github.com/tamamo/tamamo/web"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/checks"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/modules"
+	"github.com/foxgirlsorg/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/module"
+	"github.com/foxgirlsorg/tamamo/web"
 )
 
 // URLs of Tamamo's reserved endpoints.
@@ -36,9 +40,19 @@ const (
 	Prefix    = "/.tamamo/"
 	VerifyURL = "/.tamamo/api/verify"
 	AuthURL   = "/.tamamo/auth"
-	StaticURL = "/.tamamo/static"
-	ImageURL  = "/.tamamo/static/img"
-	HealthURL = "/.tamamo/health"
+	// ForwardAuthURL is for proxies whose auth check returns the auth
+	// server's own answer to the visitor (Caddy forward_auth, Traefik
+	// ForwardAuth): 204 lets the request through, anything else carries the
+	// checking or denied page.
+	ForwardAuthURL = "/.tamamo/forward-auth"
+	StaticURL      = "/.tamamo/static"
+	ImageURL       = "/.tamamo/static/img"
+	HealthURL      = "/.tamamo/health"
+	// PassURL hands the page's script a short-lived copy of the visitor's
+	// pass, for sites that accept this site's passes (another domain).
+	PassURL = "/.tamamo/api/pass"
+	// PassHeader carries that copy to the other site.
+	PassHeader = "X-Tamamo-Pass"
 
 	// RenderHeader marks a request nginx forwards only to get a Tamamo page.
 	RenderHeader = "X-Tamamo-Render"
@@ -60,9 +74,10 @@ type Server struct {
 	fails   *failLimiter
 	now     func() time.Time
 
-	dataDir  string // page modules live in dataDir/modules
-	modMu    sync.Mutex
-	modCache map[string]modules.Checker // check modules by their config JSON
+	bots       *checks.BotVerifier
+	host       *modules.Host // runs the Go modules
+	checkMu    sync.Mutex
+	checkCache map[string]any // built-in checks by scope and settings
 }
 
 // derived caches values computed from one config snapshot. It is rebuilt
@@ -72,7 +87,8 @@ type derived struct {
 	trusted []netip.Prefix
 	chal    *core.Signer
 	pass    *core.Signer
-	mods    []checkModule // enabled go and webhook modules, in config order
+	mods    []*modules.Instance                // running modules, in config order
+	core    map[*config.Protection]*siteChecks // built-in checks per protection section
 }
 
 // New creates the handler.
@@ -90,12 +106,19 @@ func New(mgr *config.Manager, st *stats.Stats, as *assets.Store) *Server {
 		used:    newUsedSet(),
 		fails:   newFailLimiter(),
 		now:     time.Now,
+		bots:    checks.NewBotVerifier(nil),
 	}
+	dataDir := ""
 	if as != nil {
-		s.dataDir = as.DataDir()
+		dataDir = as.DataDir()
 	}
+	s.host = modules.NewHost(dataDir)
 	s.proxies.server = s
-	mgr.Subscribe(func(*config.Config) { s.proxies.reset() })
+	mgr.Subscribe(func(*config.Config) {
+		s.proxies.reset()
+		s.state() // start and stop modules right away, not on the next request
+	})
+	s.state()
 	return s
 }
 
@@ -109,7 +132,8 @@ func (s *Server) state() *derived {
 		cfg:  cfg,
 		chal: core.NewSigner(cfg.Secret, purposeChallenge),
 		pass: core.NewSigner(cfg.Secret, purposePass),
-		mods: s.buildModules(cfg),
+		mods: s.host.Apply(cfg),
+		core: s.buildChecks(cfg),
 	}
 	for _, p := range cfg.Server.TrustedProxies {
 		if pf, err := config.ParsePrefix(p); err == nil {
@@ -124,6 +148,7 @@ func (s *Server) record(e stats.Event) {
 	if s.st != nil {
 		s.st.Record(e)
 	}
+	s.observe(e)
 }
 
 // hostOnly lower-cases a Host header value and strips any port.
@@ -152,8 +177,9 @@ type decision struct {
 	bind       string
 	difficulty int
 	method     string
-	uri        string      // request URI (path + query) the decision is about
-	ev         stats.Event // pre-filled; Kind is set when recorded
+	uri        string          // request URI (path + query) the decision is about
+	req        *module.Request // what modules see of the request
+	ev         stats.Event     // pre-filled; Kind is set when recorded
 }
 
 // decide applies the site's protection settings and rules to a request for
@@ -183,14 +209,7 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 		dc.ev.IP = ip.String()
 	}
 
-	p := site.Protection
-	if !p.Enabled {
-		dc.outcome = outAllow
-		return dc
-	}
-	action, difficulty := p.DefaultAction, p.Difficulty
-	// Check modules run first; the first one with an opinion decides.
-	md, modName, decided := s.runModules(r, d, modules.Request{
+	dc.req = &module.Request{
 		Site:      site.ID,
 		Method:    method,
 		Host:      host,
@@ -199,25 +218,69 @@ func (s *Server) decide(r *http.Request, method, uri string) *decision {
 		UserAgent: r.UserAgent(),
 		IP:        ip,
 		Header:    r.Header,
-	})
+	}
+
+	p := site.Protection
+	if !p.Enabled {
+		dc.outcome = outAllow
+		return dc
+	}
+	// Unprotected paths skip everything. A path that can be read two ways
+	// must be unprotected in both readings.
+	if site.HasUnprotected() && site.Unprotected(path) && site.Unprotected(literalPath(uri)) {
+		dc.outcome = outAllow
+		dc.ev.Rule = "unprotected path"
+		return dc
+	}
+	// A browser asks before it sends a script's request with the pass
+	// header to another domain. That question can't carry the pass.
+	if method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" && s.trustedOrigin(site, r) {
+		dc.outcome = outAllow
+		dc.ev.Rule = "cors preflight"
+		return dc
+	}
+	action, difficulty := p.DefaultAction, p.Difficulty
+	// Bypass headers, the rate limit, webhooks and modules run first; the
+	// first one with an opinion decides.
+	md, label, decided := s.runChecks(r, d, site, dc.req)
 	if decided {
 		action = md.Action
-		dc.ev.Rule = "module:" + modName
+		dc.ev.Rule = label
 		if md.Difficulty > 0 {
 			difficulty = md.Difficulty
 		}
-	} else if rule := site.Rules.Match(config.RuleRequest{
-		Method:    method,
-		Host:      host,
-		Path:      path,
-		UserAgent: r.UserAgent(),
-		IP:        ip,
-		Header:    r.Header,
-	}); rule != nil {
-		action = rule.Action
-		dc.ev.Rule = rule.Name
-		if rule.Difficulty > 0 {
-			difficulty = rule.Difficulty
+	} else {
+		rr := config.RuleRequest{
+			Method:    method,
+			Host:      host,
+			Path:      path,
+			UserAgent: r.UserAgent(),
+			IP:        ip,
+			Header:    r.Header,
+		}
+		rule := site.Rules.Match(rr)
+		ruleAction := func(rule *config.Rule) string {
+			if rule == nil {
+				return p.DefaultAction
+			}
+			return rule.Action
+		}
+		// A path with encoded slashes or dot segments can be read two ways,
+		// and the upstream may not read it the way the rules did. Match the
+		// other reading too and keep the stricter outcome, so such a path
+		// can't borrow an allow rule meant for a different page.
+		if lit := literalPath(uri); lit != path {
+			rr.Path = lit
+			if other := site.Rules.Match(rr); actionRank(ruleAction(other)) > actionRank(ruleAction(rule)) {
+				rule = other
+			}
+		}
+		if rule != nil {
+			action = rule.Action
+			dc.ev.Rule = rule.Name
+			if rule.Difficulty > 0 {
+				difficulty = rule.Difficulty
+			}
 		}
 	}
 	dc.difficulty = difficulty
@@ -246,11 +309,55 @@ func (s *Server) validPass(dc *decision, r *http.Request) bool {
 		if dc.d.pass.Verify(c.Value, &pc) != nil {
 			continue
 		}
-		if pc.E > now && pc.S == dc.site.ID && pc.B == dc.bind && pc.D >= dc.difficulty {
+		if !pc.X && pc.E > now && pc.S == dc.site.ID && pc.B == dc.bind && pc.D >= dc.difficulty {
+			return true
+		}
+	}
+	if len(dc.site.Trusts) == 0 {
+		return false
+	}
+	// A pass earned on a site this one trusts, sent by the page's script.
+	for _, v := range r.Header.Values(PassHeader) {
+		var pc core.PassClaims
+		if dc.d.pass.Verify(strings.TrimSpace(v), &pc) != nil || !pc.X || pc.E <= now || pc.D < dc.difficulty {
+			continue
+		}
+		from := dc.site.Trusts[pc.S]
+		if from == nil {
+			continue
+		}
+		fp := from.Protection
+		if pc.B == core.BindHash(dc.ip, r.UserAgent(), fp.BindIP, fp.BindUserAgent) {
 			return true
 		}
 	}
 	return false
+}
+
+// trustedOrigin reports whether the request's Origin is a site whose passes
+// site accepts.
+func (s *Server) trustedOrigin(site *config.SiteView, r *http.Request) bool {
+	if len(site.Trusts) == 0 {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	_, rest, ok := strings.Cut(origin, "://")
+	if !ok || rest == "" || strings.ContainsAny(rest, "/ ") {
+		return false
+	}
+	return site.Trusts[s.mgr.ForHost(rest).ID] != nil
+}
+
+// authEndpoints reports whether /.tamamo/auth, /.tamamo/forward-auth and the
+// render-only header are in use (server.auth_endpoints).
+func authEndpoints(cfg *config.Config) bool {
+	switch cfg.Server.AuthEndpoints {
+	case "on":
+		return true
+	case "off":
+		return false
+	}
+	return cfg.Server.Target == ""
 }
 
 func (dc *decision) record(s *Server, kind string) {
@@ -286,7 +393,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveReserved(w, r)
 		return
 	}
-	if isRenderOnly(r) {
+	if isRenderOnly(r) && authEndpoints(s.mgr.Get()) {
 		s.serveRenderOnly(w, r)
 		return
 	}
@@ -299,7 +406,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dc.record(s, dc.outcome)
-		s.proxy(w, r, dc.site.Target, dc.ip, dc.site.Protection.CookieName)
+		s.proxy(w, r, dc)
 	case outBlock:
 		dc.record(s, stats.KindBlock)
 		s.render(w, r, http.StatusForbidden, page.Data{State: "denied"})
@@ -349,6 +456,41 @@ func (s *Server) serveAuth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveForwardAuth answers the auth check of Caddy (forward_auth) and Traefik
+// (ForwardAuth). Both hand a non-2xx answer to the visitor as it is, so the
+// checking page (401) and the denied page (403) are served right here.
+//
+// Traefik calls the endpoint with its own Host header and puts the visitor's
+// in X-Forwarded-Host, which is used when the proxy is trusted.
+func (s *Server) serveForwardAuth(w http.ResponseWriter, r *http.Request) {
+	d := s.state()
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" && core.PeerTrusted(r, d.cfg.Server.IPSource, d.trusted) {
+		r.Host = h
+	}
+	// Only the headers the proxy sets itself. X-Original-URI comes straight
+	// from the visitor here, who could name a page that is let through.
+	method, uri := r.Header.Get("X-Forwarded-Method"), r.Header.Get("X-Forwarded-Uri")
+	if method == "" {
+		method = r.Method
+	}
+	if uri == "" {
+		uri = r.URL.RequestURI()
+	}
+	dc := s.decide(r, method, uri)
+	w.Header().Set("Cache-Control", "no-store")
+	switch dc.outcome {
+	case outAllow, outPass:
+		dc.record(s, dc.outcome)
+		w.WriteHeader(http.StatusNoContent)
+	case outBlock:
+		dc.record(s, stats.KindBlock)
+		s.render(w, r, http.StatusForbidden, page.Data{State: "denied"})
+	default:
+		dc.record(s, stats.KindChallenge)
+		s.challengeStatus(w, r, dc, http.StatusUnauthorized)
+	}
+}
+
 // isNavigation reports whether the request looks like a browser loading a
 // page (as opposed to fetch/XHR, images, scripts or websockets), i.e.
 // whether showing an HTML challenge page makes sense.
@@ -374,9 +516,27 @@ func isNavigation(r *http.Request) bool {
 
 // challenge issues a fresh signed challenge and serves the checking page.
 func (s *Server) challenge(w http.ResponseWriter, r *http.Request, dc *decision) {
+	s.challengeStatus(w, r, dc, http.StatusOK)
+}
+
+// challengeStatus is challenge with the status code of the page.
+func (s *Server) challengeStatus(w http.ResponseWriter, r *http.Request, dc *decision, status int) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Add("Vary", "Cookie")
-	if !isNavigation(r) {
+	// Browsers leave Sec-Fetch-* out on plain http, so two more signs of a
+	// script request: a GET never carries Origin when it loads a page, and a
+	// request from a site whose passes are accepted here is that site's
+	// script talking to its API.
+	trusted := s.trustedOrigin(dc.site, r)
+	scripted := trusted || (r.Header.Get("Origin") != "" && (dc.method == http.MethodGet || dc.method == http.MethodHead))
+	if scripted || !isNavigation(r) {
+		// Let the script of a trusted site read this answer, so it can
+		// fetch a fresh pass and try again.
+		if trusted {
+			w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Add("Vary", "Origin")
+		}
 		writeJSON(w, r, http.StatusForbidden, map[string]string{"error": "challenge_required"})
 		return
 	}
@@ -391,7 +551,7 @@ func (s *Server) challenge(w http.ResponseWriter, r *http.Request, dc *decision)
 	if dc.method == http.MethodGet || dc.method == http.MethodHead {
 		redirect = safeRedirect(dc.uri)
 	}
-	s.render(w, r, http.StatusOK, page.Data{
+	s.render(w, r, status, page.Data{
 		State:      "checking",
 		Token:      dc.d.chal.Sign(claims),
 		Random:     claims.R,
@@ -410,9 +570,10 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, d pa
 	d.StaticURL = StaticURL
 	if s.as != nil {
 		d.Images = s.as.URLs(ImageURL)
+		d.MascotCredit = page.DefaultMascots(s.as.Custom())
 	}
 	d.Lang = site.Page.PickLanguage(r.Header.Get("Accept-Language"))
-	d.Modules = s.pageModules(s.state().cfg, site.ID)
+	d.Modules = s.pageModules(site.ID, d.Host, d.State, d.Lang)
 	var buf bytes.Buffer
 	if err := page.Render(&buf, site.Page, d); err != nil {
 		slog.Error("rendering page failed", "state", d.State, "err", err)

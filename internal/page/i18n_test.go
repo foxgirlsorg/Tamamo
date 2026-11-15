@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func TestTranslate(t *testing.T) {

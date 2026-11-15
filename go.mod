@@ -1,4 +1,4 @@
-module github.com/tamamo/tamamo
+module github.com/foxgirlsorg/tamamo
 
 go 1.25
 

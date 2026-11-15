@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func init() { pbkdf2Iterations = 1000 }
@@ -342,5 +342,53 @@ func TestPasswordHash(t *testing.T) {
 	}
 	if verifyPassword("garbage", "x") {
 		t.Fatal("garbage hash verified")
+	}
+}
+
+// Behind the web UI container every sign-in comes from one address. With
+// that proxy trusted, the lockout follows the address it reports.
+func TestLoginLockoutBehindTrustedProxy(t *testing.T) {
+	login := func(e *env, forwarded, password string) int {
+		req := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"admin","password":"`+password+`"}`))
+		req.RemoteAddr = "172.18.0.5:40000" // the web UI container
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(csrfHeader, "1")
+		req.Header.Set("X-Forwarded-For", forwarded)
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	const wrong, right = "wrong password!", "correct horse battery"
+
+	e := newEnv(t)
+	e.setup()
+	if err := e.cfg.Update(func(c *config.Config) error { c.Admin.TrustedProxies = []string{"private"}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < freeFailures; i++ {
+		login(e, "203.0.113.50", wrong)
+	}
+	if code := login(e, "203.0.113.50", right); code != http.StatusTooManyRequests {
+		t.Errorf("the attacker is not locked out: %d", code)
+	}
+	if code := login(e, "198.51.100.7", right); code != 200 {
+		t.Errorf("the admin is locked out by someone else's failures: %d", code)
+	}
+	// A made-up address in front of the real one doesn't help.
+	if code := login(e, "1.2.3.4, 203.0.113.50", right); code != http.StatusTooManyRequests {
+		t.Errorf("a spoofed X-Forwarded-For entry dodged the lockout: %d", code)
+	}
+
+	// Without trusted proxies the header is ignored, as before.
+	e = newEnv(t)
+	e.setup()
+	for i := 0; i < freeFailures; i++ {
+		login(e, "203.0.113.50", wrong)
+	}
+	if code := login(e, "198.51.100.7", right); code != http.StatusTooManyRequests {
+		t.Errorf("X-Forwarded-For was believed without a trusted proxy: %d", code)
+	}
+	if err := e.cfg.Update(func(c *config.Config) error { c.Admin.TrustedProxies = []string{"not an address"}; return nil }); err == nil {
+		t.Error("a bad trusted proxy was accepted")
 	}
 }

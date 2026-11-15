@@ -188,6 +188,7 @@ func ParseConfigYAML(data []byte) (*Config, error) {
 		byTag[tag] = cv.Field(i)
 	}
 	var sitesNode *yaml.Node
+	var scoped []scopedChange
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		k, v := deref(root.Content[i]), deref(root.Content[i+1])
@@ -204,6 +205,12 @@ func ParseConfigYAML(data []byte) (*Config, error) {
 				return nil, err
 			}
 			cfg.Rules = rs
+		case "modules":
+			pending, err := parseModules(cfg, v)
+			if err != nil {
+				return nil, err
+			}
+			scoped = pending
 		default:
 			if k.Value == "admin" && v.Kind == yaml.MappingNode {
 				// admin.enabled was a setting before TAMAMO_ENABLE_API; ignore it.
@@ -230,6 +237,7 @@ func ParseConfigYAML(data []byte) (*Config, error) {
 		}
 		cfg.Sites = sites
 	}
+	applyScoped(cfg, cfg.Sites, scoped)
 	return cfg, nil
 }
 

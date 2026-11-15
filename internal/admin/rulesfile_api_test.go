@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 // hasIDLine reports whether any line of a rules file sets an "id:" key.

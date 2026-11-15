@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hello</title>
+  <link rel="stylesheet" href="/assets/modules/kit/tamamo.css">
+  <script src="/assets/modules/kit/tamamo.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="tm-stack">
+    <div class="tm-card">
+      <div class="tm-row">
+        <div>
+          <h2>What this module saw</h2>
+          <p class="tm-muted tm-small">Counted since the module was switched on. Kept in its data folder across restarts.</p>
+        </div>
+        <span class="tm-spacer"></span>
+        <button id="refresh" class="tm-outline" type="button">Refresh</button>
+        <button id="reset" class="tm-danger" type="button">Reset</button>
+      </div>
+      <div id="stats" class="tm-grid" style="margin-top: 1rem"></div>
+    </div>
+
+    <div class="tm-card">
+      <h2>Paths it blocked</h2>
+      <table>
+        <thead><tr><th>Path</th><th class="tm-num">Requests</th></tr></thead>
+        <tbody id="paths"></tbody>
+      </table>
+      <p id="no-paths" class="tm-empty" hidden>Nothing blocked yet.</p>
+    </div>
+  </div>
+</body>
+</html>

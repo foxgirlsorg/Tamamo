@@ -66,7 +66,7 @@ func TestFileRoundTripSites(t *testing.T) {
 	c.Sites[0].Protection.Difficulty = 6
 	c.Sites[0].Page.Title = "Blog check"
 	c.Sites[0].Page.Language = "de"
-	c.Modules = []ModuleConfig{{Name: "m", Enabled: true, Type: ModuleGo, Module: "ratelimit", Sites: []string{"My Blog"}}}
+	c.Modules = []ModuleConfig{{Name: "m", Enabled: true, Module: "plain", Sites: []string{"My Blog"}}}
 	c = mustValid(t, c)
 	if c.Sites[0].ID != "my-blog" || c.Modules[0].Sites[0] != "my-blog" {
 		t.Fatalf("ids: %q %v", c.Sites[0].ID, c.Modules[0].Sites)

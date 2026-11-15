@@ -7,9 +7,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w" -o /out/tamamo ./cmd/tamamo \
- && mkdir -p /out/data
+# Extra modules to compile in, separated by spaces. Each one is a Go module
+# path, optionally with @version or =<folder inside the build context>:
+#   docker build --build-arg MODULES="github.com/you/tamamo-geo@v1.2.0" -t tamamo .
+#   docker build --build-arg MODULES="github.com/foxgirlsorg/tamamo/examples/hello=./examples/hello" -t tamamo .
+ARG MODULES=""
+RUN export CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH;     if [ -n "$MODULES" ]; then       GOOS= GOARCH= go build -o /tmp/tamamo-build ./cmd/tamamo-build       && with="" && for m in $MODULES; do with="$with --with $m"; done       && /tmp/tamamo-build --tamamo /src $with -o /out/tamamo;     else       go build -trimpath -ldflags="-s -w" -o /out/tamamo ./cmd/tamamo;     fi  && mkdir -p /out/data
 
 # ---- run ----
 FROM gcr.io/distroless/static-debian12:nonroot

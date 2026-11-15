@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func fxAdmin(t *testing.T) http.Handler {

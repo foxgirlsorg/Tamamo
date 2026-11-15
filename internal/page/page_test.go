@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func images() map[string]string {
@@ -228,6 +228,72 @@ func TestPreviewFlag(t *testing.T) {
 	html := render(t, &p, d)
 	if scriptData(t, html)["preview"] != true || !strings.Contains(html, `data-preview="on"`) {
 		t.Error("preview flag missing")
+	}
+}
+
+const artCreditLink = `<a href="https://t.me/tr1flu0r1d3_exe_art" target="_blank" rel="noopener noreferrer">tr1flu0r1d3.exe</a>`
+
+// artCreditInFooter is the art part inside the footer: after "Protected by
+// Tamamo", separated by a middle dot, and nothing after it but </footer>.
+const artCreditInFooter = `Protected by <strong style="display:inline !important;font-weight:700 !important;color:inherit !important;font-size:inherit !important">Tamamo</strong></span><span class="tm-art"><span class="tm-art-sep" aria-hidden="true">&middot;</span>Art by ` + artCreditLink + `</span></footer>`
+
+func TestMascotArtCredit(t *testing.T) {
+	for _, withCredit := range []bool{true, false} {
+		for _, show := range []bool{true, false} {
+			for _, state := range []string{"checking", "success", "denied", "error"} {
+				p := config.DefaultPage()
+				p.MascotShow = show
+				d := data(state)
+				d.MascotCredit = withCredit
+				html := render(t, &p, d)
+
+				want := withCredit && show
+				if got := strings.Contains(html, "tr1flu0r1d3.exe"); got != want {
+					t.Fatalf("credit=%v show=%v state=%s: art credit present=%v, want %v",
+						withCredit, show, state, got, want)
+				}
+				if got := strings.Contains(html, "Art by "); got != want {
+					t.Fatalf("credit=%v show=%v state=%s: \"Art by\" present=%v, want %v",
+						withCredit, show, state, got, want)
+				}
+				if strings.Contains(html, "Mascot Eru") || strings.Contains(html, "tm-art-credit") {
+					t.Fatalf("credit=%v show=%v state=%s: old art credit markup still rendered", withCredit, show, state)
+				}
+				if want && !strings.Contains(html, artCreditInFooter) {
+					t.Fatalf("credit=%v show=%v state=%s: art credit must sit inside the footer after the Tamamo credit", withCredit, show, state)
+				}
+				if !want && strings.Contains(html, "&middot;") {
+					t.Fatalf("credit=%v show=%v state=%s: separator rendered without art credit", withCredit, show, state)
+				}
+				// The Tamamo credit footer must stay a direct child of body, last.
+				if !strings.Contains(html, credit) {
+					t.Fatalf("state=%s: footer credit missing", state)
+				}
+				tail := html[strings.LastIndex(html, credit):]
+				if !strings.HasSuffix(strings.TrimSpace(tail), "</footer>\n</body>\n</html>") &&
+					!strings.HasSuffix(strings.TrimSpace(tail), "</footer>\n</body>\n</html>\n") {
+					t.Fatalf("state=%s: footer credit is not last in body", state)
+				}
+			}
+		}
+	}
+}
+
+func TestDefaultMascots(t *testing.T) {
+	cases := []struct {
+		custom map[string]bool
+		want   bool
+	}{
+		{map[string]bool{}, true},
+		{map[string]bool{"background": true, "favicon": true}, true},
+		{map[string]bool{"checking": true}, false},
+		{map[string]bool{"success": true}, false},
+		{map[string]bool{"denied": true}, false},
+	}
+	for _, c := range cases {
+		if got := DefaultMascots(c.custom); got != c.want {
+			t.Errorf("DefaultMascots(%v) = %v, want %v", c.custom, got, c.want)
+		}
 	}
 }
 

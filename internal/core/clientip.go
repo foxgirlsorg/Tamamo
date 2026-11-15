@@ -61,6 +61,20 @@ func parseHeaderAddr(s string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+// PeerTrusted reports whether proxy headers on r are honored: a header IP
+// source is configured and the direct peer is a trusted proxy (or the trusted
+// list is empty). It is the same test ClientIP applies.
+func PeerTrusted(r *http.Request, source string, trusted []netip.Prefix) bool {
+	if source == "" || source == SourceRemote {
+		return false
+	}
+	if len(trusted) == 0 {
+		return true
+	}
+	peer := PeerAddr(r)
+	return peer.IsValid() && inPrefixes(peer, trusted)
+}
+
 // ClientIP works out the visitor's address.
 //
 // source selects where to look: "remote" (the TCP peer), or one of the proxy

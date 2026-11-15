@@ -13,9 +13,13 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/foxgirlsorg/tamamo/internal/checks"
 )
 
 // Actions a rule (or the default) can take.
@@ -37,8 +41,8 @@ type Config struct {
 	Rules      []Rule     `json:"rules" yaml:"rules"`
 	Page       Page       `json:"page" yaml:"page"`
 	Sites      []Site     `json:"sites" yaml:"sites"`
-	// Modules extend Tamamo: request checks (webhooks or compiled-in Go
-	// modules) and checking-page add-ons. See modules.go.
+	// Modules switch on the Go modules compiled into this build. See
+	// modules.go and the module package.
 	Modules []ModuleConfig `json:"modules" yaml:"modules"`
 	Admin   AdminConfig    `json:"admin" yaml:"admin"`
 	Stats   StatsConfig    `json:"stats" yaml:"stats"`
@@ -65,12 +69,16 @@ type Site struct {
 }
 
 type ServerConfig struct {
-	Listen             string   `json:"listen" yaml:"listen"`
-	Target             string   `json:"target" yaml:"target"`
-	IPSource           string   `json:"ip_source" yaml:"ip_source"`
-	TrustedProxies     []string `json:"trusted_proxies" yaml:"trusted_proxies"`
-	PreserveHost       bool     `json:"preserve_host" yaml:"preserve_host"`
-	InsecureSkipVerify bool     `json:"insecure_skip_verify" yaml:"insecure_skip_verify"`
+	Listen         string   `json:"listen" yaml:"listen"`
+	Target         string   `json:"target" yaml:"target"`
+	IPSource       string   `json:"ip_source" yaml:"ip_source"`
+	TrustedProxies []string `json:"trusted_proxies" yaml:"trusted_proxies"`
+	// AuthEndpoints says whether /.tamamo/auth and /.tamamo/forward-auth
+	// answer: "on", "off", or "auto" (only while Target is empty, i.e. when a
+	// proxy in front does the forwarding).
+	AuthEndpoints      string `json:"auth_endpoints" yaml:"auth_endpoints"`
+	PreserveHost       bool   `json:"preserve_host" yaml:"preserve_host"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify" yaml:"insecure_skip_verify"`
 }
 
 type Protection struct {
@@ -84,6 +92,80 @@ type Protection struct {
 	CookieName       string `json:"cookie_name" yaml:"cookie_name"`
 	CookieDomain     string `json:"cookie_domain" yaml:"cookie_domain"`
 	MaxFailures      int    `json:"max_failures_per_minute" yaml:"max_failures_per_minute"`
+
+	// UnprotectedPaths are let through before anything else runs: no check,
+	// no rate limit, no webhook, no module, no rule. Patterns as in rules.
+	UnprotectedPaths []string `json:"unprotected_paths" yaml:"unprotected_paths"`
+	// AcceptPassesFrom lists sites (by name or ID) whose visitors need no
+	// second check here: a pass earned there is accepted in the
+	// X-Tamamo-Pass header. For an API on another domain than its website.
+	AcceptPassesFrom []string `json:"accept_passes_from" yaml:"accept_passes_from"`
+	// VerifiedBots checks that a visitor calling itself Googlebot, Bingbot
+	// and so on really comes from that search engine.
+	VerifiedBots VerifiedBots `json:"verified_bots" yaml:"verified_bots"`
+
+	// Checks that run before the rules, in this order: bypass headers, the
+	// rate limit, webhooks. Modules come after them, then the rules.
+	BypassHeaders []BypassHeader `json:"bypass_headers" yaml:"bypass_headers"`
+	RateLimit     RateLimit      `json:"rate_limit" yaml:"rate_limit"`
+	Webhooks      []Webhook      `json:"webhooks" yaml:"webhooks"`
+}
+
+// VerifiedBots confirms well-known crawlers by reverse DNS.
+type VerifiedBots struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// Action is what happens to a visitor that only claims to be one of the
+	// crawlers: "block" or "challenge".
+	Action string `json:"action" yaml:"action"`
+}
+
+// BypassHeader lets requests that carry a secret header through unchecked,
+// e.g. an uptime monitor or your own scripts.
+type BypassHeader struct {
+	Name   string `json:"name" yaml:"name"`
+	Header string `json:"header" yaml:"header"`
+	// Value is the secret the header must carry (at least 16 characters).
+	Value string `json:"value" yaml:"value"`
+}
+
+// RateLimit limits how many requests one IP address (or IPv6 network) may
+// make in a time window.
+type RateLimit struct {
+	Enabled       bool `json:"enabled" yaml:"enabled"`
+	Requests      int  `json:"requests" yaml:"requests"`
+	WindowSeconds int  `json:"window_seconds" yaml:"window_seconds"`
+	// Action is what happens past the limit: "block" or "challenge".
+	Action string `json:"action" yaml:"action"`
+	// IPv6Prefix: IPv6 addresses are counted per network of this size (48-128).
+	IPv6Prefix int `json:"ipv6_prefix" yaml:"ipv6_prefix"`
+	// MaxIPs bounds memory use: the most addresses tracked at once.
+	MaxIPs int `json:"max_ips" yaml:"max_ips"`
+}
+
+// Webhook asks an HTTP endpoint of yours about each request.
+type Webhook struct {
+	Name      string `json:"name" yaml:"name"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	URL       string `json:"url" yaml:"url"`
+	TimeoutMs int    `json:"timeout_ms" yaml:"timeout_ms"`
+	// OnError says what to do when the endpoint fails or times out:
+	// "continue" (ignore it), "challenge" or "block".
+	OnError string `json:"on_error" yaml:"on_error"`
+	// CacheSeconds caches answers per visitor and path (0-3600, 0 = off).
+	CacheSeconds int `json:"cache_seconds" yaml:"cache_seconds"`
+	// SendCookies includes the Cookie and Authorization headers in what is
+	// sent to the endpoint. Off by default: they carry visitors' sessions.
+	SendCookies bool `json:"send_cookies" yaml:"send_cookies"`
+}
+
+// WebhookOptions turns a validated webhook into options for its checker.
+func (w *Webhook) WebhookOptions() checks.WebhookOptions {
+	return checks.WebhookOptions{
+		URL:         w.URL,
+		Timeout:     time.Duration(w.TimeoutMs) * time.Millisecond,
+		CacheTTL:    time.Duration(w.CacheSeconds) * time.Second,
+		SendCookies: w.SendCookies,
+	}
 }
 
 type HeaderMatch struct {
@@ -215,10 +297,15 @@ type AdminConfig struct {
 	Listen  string `json:"listen" yaml:"listen"`
 	// Domains, when set, makes the admin API answer only requests whose Host
 	// is one of these names (e.g. "admin.example.com"); others get 404.
-	Domains      []string `json:"domains" yaml:"domains"`
-	Username     string   `json:"username" yaml:"username"`
-	PasswordHash string   `json:"password_hash,omitempty" yaml:"password_hash,omitempty"`
-	SessionHours int      `json:"session_hours" yaml:"session_hours"`
+	Domains []string `json:"domains" yaml:"domains"`
+	// TrustedProxies are the proxies in front of the admin API (the web UI
+	// container, your own reverse proxy) whose X-Forwarded-For header says
+	// who is signing in. IPs, CIDR ranges, or "private" for every private
+	// and loopback address. Empty: the connecting address counts.
+	TrustedProxies []string `json:"trusted_proxies" yaml:"trusted_proxies"`
+	Username       string   `json:"username" yaml:"username"`
+	PasswordHash   string   `json:"password_hash,omitempty" yaml:"password_hash,omitempty"`
+	SessionHours   int      `json:"session_hours" yaml:"session_hours"`
 }
 
 type StatsConfig struct {
@@ -317,6 +404,10 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("trusted proxy %q is not an IP or CIDR range", p)
 		}
 	}
+	s.AuthEndpoints = strings.ToLower(strings.TrimSpace(s.AuthEndpoints))
+	if !oneOf(s.AuthEndpoints, "on", "off") {
+		s.AuthEndpoints = "auto"
+	}
 	if err := validateProtection(&c.Protection); err != nil {
 		return err
 	}
@@ -343,6 +434,17 @@ func (c *Config) Validate() error {
 		return err
 	}
 	a.Domains = domains
+	proxies := []string{}
+	for _, p := range a.TrustedProxies {
+		if p = strings.ToLower(strings.TrimSpace(p)); p == "" {
+			continue
+		}
+		if _, err := AdminProxyPrefixes(p); err != nil {
+			return fmt.Errorf("admin trusted proxy %q is not an IP, a CIDR range or the word private", p)
+		}
+		proxies = append(proxies, p)
+	}
+	a.TrustedProxies = proxies
 
 	c.Stats.RecentEvents = clamp(c.Stats.RecentEvents, 10, 2000)
 	return nil
@@ -511,6 +613,122 @@ func validateProtection(p *Protection) error {
 	}
 	p.CookieDomain = strings.TrimSpace(p.CookieDomain)
 	p.MaxFailures = clamp(p.MaxFailures, 0, 10000)
+
+	paths := []string{}
+	for _, v := range p.UnprotectedPaths {
+		if v = strings.TrimSpace(v); v == "" {
+			continue
+		}
+		if _, err := compilePattern(v, true, false); err != nil {
+			return fmt.Errorf("unprotected path %q: %v", v, err)
+		}
+		paths = append(paths, v)
+	}
+	if len(paths) > 500 {
+		return errors.New("too many unprotected paths (at most 500)")
+	}
+	p.UnprotectedPaths = paths
+
+	from := []string{}
+	for _, v := range p.AcceptPassesFrom {
+		if v = strings.TrimSpace(v); v != "" && !slices.Contains(from, v) {
+			from = append(from, v)
+		}
+	}
+	p.AcceptPassesFrom = from
+
+	vb := &p.VerifiedBots
+	vb.Action = strings.ToLower(strings.TrimSpace(vb.Action))
+	if vb.Action == "" {
+		vb.Action = ActionBlock
+	}
+	if !oneOf(vb.Action, ActionBlock, ActionChallenge) {
+		return errors.New("the verified bots action must be block or challenge")
+	}
+	return validateChecks(p)
+}
+
+// validateChecks normalizes the bypass headers, rate limit and webhooks.
+func validateChecks(p *Protection) error {
+	headers := []BypassHeader{}
+	for _, b := range p.BypassHeaders {
+		h, err := checks.CheckBypass(b.Header, b.Value)
+		if err != nil {
+			return fmt.Errorf("bypass header %q: %v", strings.TrimSpace(b.Name+" "+b.Header), err)
+		}
+		b.Header = h
+		if b.Name = strings.TrimSpace(b.Name); b.Name == "" {
+			b.Name = h
+		}
+		if len(b.Name) > 64 || strings.IndexFunc(b.Name, unicode.IsControl) >= 0 {
+			return fmt.Errorf("bypass header name %q is too long or has control characters", b.Name)
+		}
+		headers = append(headers, b)
+	}
+	p.BypassHeaders = headers
+
+	rl := &p.RateLimit
+	if rl.Requests == 0 {
+		rl.Requests = 120
+	}
+	if rl.WindowSeconds == 0 {
+		rl.WindowSeconds = 60
+	}
+	if rl.IPv6Prefix == 0 {
+		rl.IPv6Prefix = 64
+	}
+	if rl.MaxIPs == 0 {
+		rl.MaxIPs = 100000
+	}
+	rl.Requests = clamp(rl.Requests, 1, 1_000_000)
+	rl.WindowSeconds = clamp(rl.WindowSeconds, 1, 86400)
+	rl.IPv6Prefix = clamp(rl.IPv6Prefix, 48, 128)
+	rl.MaxIPs = clamp(rl.MaxIPs, 100, 10_000_000)
+	rl.Action = strings.ToLower(strings.TrimSpace(rl.Action))
+	if rl.Action == "" {
+		rl.Action = ActionBlock
+	}
+	if !oneOf(rl.Action, ActionBlock, ActionChallenge) {
+		return errors.New("the rate limit's action must be block or challenge")
+	}
+
+	hooks := []Webhook{}
+	names := map[string]bool{}
+	for i, w := range p.Webhooks {
+		w.Name = strings.TrimSpace(w.Name)
+		if w.Name == "" {
+			w.Name = fmt.Sprintf("webhook-%d", i+1)
+		}
+		if len(w.Name) > 64 || strings.IndexFunc(w.Name, unicode.IsControl) >= 0 {
+			return fmt.Errorf("webhook name %q is too long or has control characters", w.Name)
+		}
+		if names[strings.ToLower(w.Name)] {
+			return fmt.Errorf("two webhooks are called %q; give every webhook its own name", w.Name)
+		}
+		names[strings.ToLower(w.Name)] = true
+		w.URL = strings.TrimSpace(w.URL)
+		if err := checks.CheckWebhookURL(w.URL); err != nil {
+			return fmt.Errorf("webhook %q: %v", w.Name, err)
+		}
+		if w.TimeoutMs == 0 {
+			w.TimeoutMs = 500
+		}
+		if w.TimeoutMs < 1 || w.TimeoutMs > 10000 {
+			return fmt.Errorf("webhook %q: timeout_ms must be from 1 to 10000", w.Name)
+		}
+		if w.CacheSeconds < 0 || w.CacheSeconds > 3600 {
+			return fmt.Errorf("webhook %q: cache_seconds must be from 0 to 3600", w.Name)
+		}
+		w.OnError = strings.ToLower(strings.TrimSpace(w.OnError))
+		if w.OnError == "" {
+			w.OnError = "continue"
+		}
+		if !oneOf(w.OnError, "continue", ActionChallenge, ActionBlock) {
+			return fmt.Errorf("webhook %q: on_error must be continue, challenge or block", w.Name)
+		}
+		hooks = append(hooks, w)
+	}
+	p.Webhooks = hooks
 	return nil
 }
 
@@ -645,6 +863,45 @@ type SiteView struct {
 	Rules      *RuleSet
 	Page       *Page
 	hosts      []matcher
+
+	// Trusts holds the sites whose passes this site accepts, by ID
+	// (protection.accept_passes_from).
+	Trusts map[string]*SiteView
+	// SharesPass is true when another site accepts this site's passes.
+	SharesPass  bool
+	unprotected []matcher
+}
+
+// Unprotected reports whether path is one of the site's unprotected paths.
+func (v *SiteView) Unprotected(path string) bool {
+	for _, m := range v.unprotected {
+		if m(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasUnprotected reports whether the site lists any unprotected path.
+func (v *SiteView) HasUnprotected() bool { return len(v.unprotected) > 0 }
+
+// privatePrefixes is what "private" stands for in admin.trusted_proxies.
+var privatePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"), netip.MustParsePrefix("fc00::/7"),
+}
+
+// AdminProxyPrefixes turns one admin.trusted_proxies entry into prefixes.
+func AdminProxyPrefixes(entry string) ([]netip.Prefix, error) {
+	if strings.EqualFold(strings.TrimSpace(entry), "private") {
+		return privatePrefixes, nil
+	}
+	p, err := ParsePrefix(entry)
+	if err != nil {
+		return nil, err
+	}
+	return []netip.Prefix{p}, nil
 }
 
 func buildViews(c *Config) (*SiteView, []*SiteView, map[string]*SiteView, error) {
@@ -683,6 +940,27 @@ func buildViews(c *Config) (*SiteView, []*SiteView, map[string]*SiteView, error)
 		}
 		views = append(views, v)
 		byID[v.ID] = v
+	}
+	all := append([]*SiteView{def}, views...)
+	for _, v := range all {
+		for _, p := range v.Protection.UnprotectedPaths {
+			m, err := compilePattern(p, true, false)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			v.unprotected = append(v.unprotected, m)
+		}
+		for _, name := range v.Protection.AcceptPassesFrom {
+			for _, from := range all {
+				if from != v && (from.ID == name || strings.EqualFold(from.Name, name)) {
+					if v.Trusts == nil {
+						v.Trusts = map[string]*SiteView{}
+					}
+					v.Trusts[from.ID] = from
+					from.SharesPass = true
+				}
+			}
+		}
 	}
 	return def, views, byID, nil
 }
@@ -730,6 +1008,7 @@ var envOverrides = []struct{ env, key string }{
 	{"TAMAMO_ADMIN_LISTEN", "admin.listen"},
 	{"TAMAMO_IP_SOURCE", "server.ip_source"},
 	{"TAMAMO_ADMIN_DOMAIN", "admin.domains"},
+	{"TAMAMO_ADMIN_TRUSTED_PROXIES", "admin.trusted_proxies"},
 	// The admin login itself is written by cmd/tamamo (it needs hashing);
 	// the lock only stops the web UI from changing it.
 	{"TAMAMO_ADMIN_USERNAME", "admin.login"},
@@ -751,6 +1030,9 @@ func (m *Manager) applyEnv(c *Config) {
 	}
 	if v := os.Getenv("TAMAMO_ADMIN_DOMAIN"); v != "" {
 		c.Admin.Domains = strings.Split(v, ",")
+	}
+	if v := os.Getenv("TAMAMO_ADMIN_TRUSTED_PROXIES"); v != "" {
+		c.Admin.TrustedProxies = strings.Split(v, ",")
 	}
 }
 

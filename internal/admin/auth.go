@@ -10,10 +10,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
 )
 
 // pbkdf2Iterations is the work factor for new password hashes. Tests lower it.
@@ -255,6 +259,26 @@ func (l *limiter) succeed(ip string) {
 	l.mu.Lock()
 	delete(l.m, ip)
 	l.mu.Unlock()
+}
+
+// clientIP is who is signing in, for the brute-force lockout. Behind the web
+// UI container (or another proxy) every connection comes from that proxy, so
+// when the peer is one of admin.trusted_proxies the address it reports in
+// X-Forwarded-For counts instead.
+func (h *handler) clientIP(r *http.Request) string {
+	var trusted []netip.Prefix
+	for _, p := range h.o.Config.Get().Admin.TrustedProxies {
+		if pf, err := config.AdminProxyPrefixes(p); err == nil {
+			trusted = append(trusted, pf...)
+		}
+	}
+	if len(trusted) == 0 {
+		return clientIP(r)
+	}
+	if a := core.ClientIP(r, core.SourceXForwardedFor, trusted); a.IsValid() {
+		return a.String()
+	}
+	return clientIP(r)
 }
 
 func clientIP(r *http.Request) string {

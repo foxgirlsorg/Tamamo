@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
 )
 
 // ---- full flow / difficulty ----------------------------------------------------------
@@ -718,5 +718,71 @@ func TestStatsCounting(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("rule \"deny\" not counted: %+v", snap.TopRules)
+	}
+}
+
+func TestForwardAuth(t *testing.T) {
+	e := fxNew(t, fxUAConfig)
+	for _, tc := range []struct {
+		ua   string
+		code int
+		html bool
+	}{{"ALLOW", 204, false}, {"DENY", 403, true}, {"CHALLENGE", 401, true}} {
+		r := fxReq(http.MethodGet, ForwardAuthURL)
+		r.Header.Set("User-Agent", tc.ua)
+		r.Header.Set("X-Forwarded-Uri", "/docs?page=2")
+		r.Header.Set("X-Forwarded-Method", "GET")
+		w := e.do(r)
+		isHTML := strings.HasPrefix(w.Header().Get("Content-Type"), "text/html")
+		if w.Code != tc.code || isHTML != tc.html || w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d html=%v %v", tc.ua, w.Code, isHTML, w.Header())
+		}
+		if tc.ua == "CHALLENGE" && !strings.Contains(w.Body.String(), "/docs?page=2") {
+			t.Error("checking page doesn't send the visitor back to the page they asked for")
+		}
+	}
+	// The visitor's own X-Original-* headers reach this endpoint untouched
+	// and must not choose the page the answer is about.
+	es := fxNew(t, func(c *config.Config) {
+		c.Protection.DefaultAction = config.ActionAllow
+		c.Rules = []config.Rule{fxRule("admin", config.ActionBlock, config.Match{Paths: []string{"/admin/*"}})}
+	})
+	rs := fxReq(http.MethodGet, ForwardAuthURL)
+	rs.Header.Set("X-Forwarded-Uri", "/admin/secret")
+	rs.Header.Set("X-Original-URI", "/public")
+	if w := es.do(rs); w.Code != 403 {
+		t.Errorf("spoofed X-Original-URI let /admin/secret through: %d", w.Code)
+	}
+	// X-Forwarded-Method drives method rules.
+	e2 := fxNew(t, func(c *config.Config) {
+		c.Protection.DefaultAction = config.ActionAllow
+		c.Rules = []config.Rule{fxRule("no post", config.ActionBlock, config.Match{Methods: []string{"POST"}})}
+	})
+	r := fxReq(http.MethodGet, ForwardAuthURL)
+	r.Header.Set("X-Forwarded-Uri", "/x")
+	r.Header.Set("X-Forwarded-Method", "POST")
+	if w := e2.do(r); w.Code != 403 {
+		t.Errorf("X-Forwarded-Method POST: %d", w.Code)
+	}
+	// X-Forwarded-Host picks the site only when proxy headers are trusted.
+	for _, tc := range []struct {
+		source string
+		want   int
+	}{{"remote", 204}, {"x-forwarded-for", 401}} {
+		e3 := fxNew(t, func(c *config.Config) {
+			c.Server.IPSource = tc.source
+			c.Sites = []config.Site{{Name: "Other", Hosts: []string{"other.test"}}}
+		})
+		r := fxReq(http.MethodGet, ForwardAuthURL)
+		r.Host = "tamamo:8923"
+		r.Header.Set("X-Forwarded-Host", "other.test")
+		r.Header.Set("X-Forwarded-Uri", "/page")
+		r.AddCookie(e3.pass(nil))
+		if w := e3.do(r); w.Code != tc.want {
+			t.Errorf("ip_source %s: pass for the default site on other.test: %d, want %d", tc.source, w.Code, tc.want)
+		}
+	}
+	if e.up.count()+e2.up.count() != 0 {
+		t.Error("forward-auth requests were proxied")
 	}
 }

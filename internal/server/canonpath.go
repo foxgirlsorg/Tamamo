@@ -38,3 +38,44 @@ func CanonicalPath(uri string) string {
 	p, _ := canonicalPath(uri)
 	return p
 }
+
+// literalPath is the other way an upstream may read the path of uri: like
+// canonicalPath, but "%2F", "%5C" and "%2E" stay as they are and "." / ".."
+// segments are not resolved. Servers that route on the raw path (Node, Go and
+// most application frameworks) see "/search/..%2Frobots.txt" as something
+// under /search/, while canonicalPath (and nginx) see "/robots.txt".
+func literalPath(uri string) string {
+	p, _, _ := strings.Cut(uri, "?")
+	p, _, _ = strings.Cut(p, "#")
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '%' && i+2 < len(p) {
+			switch strings.ToLower(p[i+1 : i+3]) {
+			case "2f", "5c", "2e":
+				// Escape the escape, so unescaping below gives it back.
+				b.WriteString("%25")
+				continue
+			}
+		}
+		b.WriteByte(p[i])
+	}
+	p = b.String()
+	if dec, err := url.PathUnescape(p); err == nil {
+		p = dec
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
+}
+
+// actionRank orders actions from most to least permissive.
+func actionRank(action string) int {
+	switch action {
+	case "allow":
+		return 0
+	case "block":
+		return 2
+	}
+	return 1
+}

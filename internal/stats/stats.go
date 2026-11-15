@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 // Event kinds.

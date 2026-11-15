@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
-	"github.com/tamamo/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
 )
 
 const browserUA = "Mozilla/5.0 (X11; Linux x86_64) Test/1.0"
@@ -44,6 +44,7 @@ func setup(t *testing.T) (*Server, *stats.Stats, *upstreamSeen) {
 	}
 	if err := mgr.Update(func(c *config.Config) error {
 		c.Server.Target = up.URL
+		c.Server.AuthEndpoints = "on"
 		c.Protection.Difficulty = 1
 		c.Stats.Enabled = true
 		return nil

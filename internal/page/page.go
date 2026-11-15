@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/web"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/web"
 )
 
 // Data is the per-request part of the page.
@@ -35,6 +35,17 @@ type Data struct {
 	Lang string
 	// Modules are page modules added to the page, in order.
 	Modules []Module
+	// MascotCredit asks for the mascot art credit line. Callers set it only
+	// when the mascot images are the built-in defaults (see DefaultMascots).
+	// The line is shown only when the page also shows the mascot.
+	MascotCredit bool
+}
+
+// DefaultMascots reports whether the checking, success and denied mascots are
+// all the built-in defaults, given the per-slot result of assets.Store.Custom.
+// The mascot art credit is only true for the built-in art.
+func DefaultMascots(custom map[string]bool) bool {
+	return !custom["checking"] && !custom["success"] && !custom["denied"]
 }
 
 // Module is one page module's additions to the page.
@@ -157,6 +168,7 @@ type view struct {
 	SolverURL  string
 	Difficulty int
 	CreditCSS  template.CSS
+	ArtCredit  bool // show the mascot art credit line
 	Script     script
 	Modules    []Module
 	Labels     config.Labels
@@ -260,6 +272,7 @@ func Render(w io.Writer, p *config.Page, d Data) error {
 		SolverURL:  static + "/solver.js",
 		Difficulty: diff,
 		CreditCSS:  template.CSS(creditCSS(p)),
+		ArtCredit:  d.MascotCredit && p.MascotShow,
 		Modules:    d.Modules,
 		Labels:     config.DefaultLabels().Over(p.Labels),
 		Script: script{
@@ -371,7 +384,7 @@ func creditCSS(p *config.Page) string {
 	if justify == "" {
 		justify, align = "center", "center"
 	}
-	return "display:flex !important;align-items:center !important;justify-content:" + justify + " !important;" +
+	return "display:flex !important;flex-wrap:wrap !important;align-items:center !important;justify-content:" + justify + " !important;" +
 		"gap:6px !important;text-align:" + align + " !important;visibility:visible !important;opacity:1 !important;" +
 		"position:relative !important;inset:auto !important;transform:none !important;translate:none !important;" +
 		"scale:none !important;rotate:none !important;clip-path:none !important;clip:auto !important;" +

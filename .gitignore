@@ -12,3 +12,10 @@
 /deploy/nginx/.env
 /deploy/nginx/nginx.compose.conf
 /deploy/nginx/data/
+
+# Agent/editor files live outside the repos
+.claude/
+AGENTS.md
+CLAUDE.md
+.agents/
+.codegraph/

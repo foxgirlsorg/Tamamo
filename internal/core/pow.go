@@ -26,6 +26,10 @@ type PassClaims struct {
 	I int64  `json:"i"` // issued at, unix seconds
 	B string `json:"b"` // client binding, see BindHash
 	S string `json:"s"` // site ID the pass is valid for
+	// X marks a pass handed to the page's script for another site
+	// (/.tamamo/api/pass). It is only accepted in the X-Tamamo-Pass header
+	// of a site that trusts S, never as a cookie.
+	X bool `json:"x,omitempty"`
 }
 
 // MaxDifficulty is the largest difficulty CheckPoW accepts (a SHA-256 hex

@@ -34,7 +34,7 @@ func TestModuleFollowsRenamedSite(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldID := c.Sites[0].ID
-	c.Modules = []ModuleConfig{{Name: "limit", Enabled: true, Type: "go", Module: "ratelimit", Sites: []string{oldID}}}
+	c.Modules = []ModuleConfig{{Name: "limit", Enabled: true, Module: "plain", Sites: []string{oldID}}}
 	c.Sites[0].Name = "Journal"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("rename broke the module: %v", err)

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func newTest(t *testing.T) (*Stats, *config.Manager, string) {

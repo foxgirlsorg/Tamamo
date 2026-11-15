@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tamamo/tamamo/web"
+	"github.com/foxgirlsorg/tamamo/web"
 )
 
 // Slots that can hold an image.

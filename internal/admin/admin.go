@@ -15,17 +15,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/stats"
-	"github.com/tamamo/tamamo/web"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/modules"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/web"
 )
 
 // Options configures the admin handler.
 type Options struct {
-	Config             *config.Manager
-	Stats              *stats.Stats
-	Assets             *assets.Store
+	Config *config.Manager
+	Stats  *stats.Stats
+	Assets *assets.Store
+	// Modules runs the Go modules (the server's host). Nil = none running.
+	Modules            *modules.Host
 	Version            string
 	RunningListen      string
 	RunningAdminListen string
@@ -80,12 +83,16 @@ func New(o Options) http.Handler {
 	// rulesfile_api.go: rules in the rules.yaml file format.
 	m.HandleFunc("GET /api/rules/file", h.auth(h.getRulesFile))
 	m.HandleFunc("PUT /api/rules/file", h.auth(h.putRulesFile))
-	// modules_api.go: available modules.
+	// modules_api.go: the modules in this build and their own admin APIs.
 	m.HandleFunc("GET /api/modules", h.auth(h.listModules))
+	m.HandleFunc("/api/x/{name}/{rest...}", h.auth(h.moduleAPI))
 
 	m.HandleFunc("GET /assets/img/{slot}", h.image)
-	// modules_api.go: page modules' files for the checking-page preview.
-	m.HandleFunc("GET /assets/modules/", h.moduleFile)
+	// modules_api.go: modules' web UI pages, the UI kit and their static
+	// files for the checking-page preview.
+	m.HandleFunc("GET /assets/modules/kit/{file...}", h.moduleKit)
+	m.HandleFunc("GET /assets/modules/ui/{id}/{file...}", h.moduleUI)
+	m.HandleFunc("GET /assets/modules/static/{id}/{file...}", h.moduleStatic)
 	// The preview iframe loads the checking page's scripts and mascots.
 	m.HandleFunc("GET /assets/challenge/", h.static)
 	m.HandleFunc("GET /assets/mascot/", h.static)

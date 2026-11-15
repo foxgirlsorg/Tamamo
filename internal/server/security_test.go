@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
 )
 
 // ---- redirect / open-redirect security ---------------------------------------
@@ -650,4 +650,56 @@ func TestFailedVerificationsAreRateLimited(t *testing.T) {
 	if r := from(fxIP, solved(fxIP)); r.StatusCode != http.StatusOK {
 		t.Errorf("limit did not reset: %d", r.StatusCode)
 	}
+}
+
+// A path the upstream may route differently than the rules read it must not
+// get through on an allow rule for the other reading.
+func TestAmbiguousPathsDontBorrowAllowRules(t *testing.T) {
+	e := fxNew(t, func(c *config.Config) {
+		c.Protection.DefaultAction = config.ActionChallenge
+		c.Rules = []config.Rule{
+			fxRule("robots", config.ActionAllow, config.Match{Paths: []string{"/robots.txt", "/.well-known/*"}}),
+			fxRule("admin", config.ActionBlock, config.Match{Paths: []string{"/admin/*"}}),
+		}
+	})
+	for _, target := range []string{
+		"/search/..%2Frobots.txt", "/search/..%2frobots.txt", "/search/%2e%2e/robots.txt",
+		"/search/../robots.txt", "/api/x/..%5c..%5crobots.txt", "/search/..%2F.well-known/x?q=1",
+		"/a/./../.well-known/x",
+	} {
+		if w := e.do(fxRaw(target)); e.proxied(w) {
+			t.Errorf("%s reached the upstream on the allow rule for another page (%d)", target, w.Code)
+		}
+		for _, url := range []string{AuthURL, ForwardAuthURL} {
+			a := fxReq(http.MethodGet, url)
+			a.Header.Set("X-Original-URI", target)
+			a.Header.Set("X-Forwarded-Uri", target)
+			if w := e.do(a); w.Code == http.StatusNoContent {
+				t.Errorf("%s via %s: let through", target, url)
+			}
+		}
+	}
+	// The plain pages still work, and block rules still catch both readings.
+	for target, want := range map[string]bool{"/robots.txt": true, "/.well-known/security.txt": true, "/caf%C3%A9": false} {
+		if w := e.do(fxRaw(target)); e.proxied(w) != want {
+			t.Errorf("%s: proxied=%v, want %v (%d)", target, !want, want, w.Code)
+		}
+	}
+	for _, target := range []string{"/public/..%2Fadmin/x", "/public/../admin/x", "/admin/x"} {
+		if w := e.do(fxRaw(target)); w.Code != http.StatusForbidden {
+			t.Errorf("%s: %d, want 403", target, w.Code)
+		}
+	}
+}
+
+// fxRaw is a GET for a request target exactly as written, undecoded.
+func fxRaw(target string) *http.Request {
+	r := fxReq(http.MethodGet, "/")
+	u, err := url.ParseRequestURI(target)
+	if err != nil {
+		panic(err)
+	}
+	r.URL = u
+	r.RequestURI = target
+	return r
 }

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
-	"github.com/tamamo/tamamo/internal/page"
-	"github.com/tamamo/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
 )
 
 // staticTypes overrides the system MIME table for the file types Tamamo
@@ -49,12 +49,26 @@ func (s *Server) serveReserved(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = io.WriteString(w, "ok")
+	case (p == AuthURL || p == ForwardAuthURL) && !authEndpoints(s.mgr.Get()):
+		http.NotFound(w, r)
+	case p == PassURL:
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			methodNotAllowed(w, "GET, HEAD")
+			return
+		}
+		s.servePass(w, r)
 	case p == AuthURL:
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			methodNotAllowed(w, "GET, HEAD")
 			return
 		}
 		s.serveAuth(w, r)
+	case p == ForwardAuthURL:
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			methodNotAllowed(w, "GET, HEAD")
+			return
+		}
+		s.serveForwardAuth(w, r)
 	case p == VerifyURL:
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w, "POST")
@@ -77,6 +91,9 @@ func (s *Server) serveReserved(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.serveModuleFile(w, r, strings.TrimPrefix(p, ModulesURL+"/"))
+	case strings.HasPrefix(p, ModuleRoutesURL+"/"):
+		// Any method: the module's handler decides.
+		s.serveModuleRoute(w, r, strings.TrimPrefix(p, ModuleRoutesURL+"/"))
 	case strings.HasPrefix(p, StaticURL+"/"):
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			methodNotAllowed(w, "GET, HEAD")
@@ -296,4 +313,41 @@ func (s *Server) label(r *http.Request, site *config.SiteView, id string) string
 		return l
 	}
 	return config.DefaultLabels().Get(id)
+}
+
+// passCopyMinutes is how long a pass handed out by servePass lasts.
+const passCopyMinutes = 15
+
+// servePass answers GET /.tamamo/api/pass: a short-lived copy of the
+// visitor's pass that the page's script sends to a site on another domain
+// in the X-Tamamo-Pass header. It only exists while another site accepts
+// this site's passes, and only for a visitor who has a valid pass here.
+func (s *Server) servePass(w http.ResponseWriter, r *http.Request) {
+	d := s.state()
+	site := s.mgr.ForHost(r.Host)
+	if !site.SharesPass {
+		http.NotFound(w, r)
+		return
+	}
+	p := site.Protection
+	ip := core.ClientIP(r, d.cfg.Server.IPSource, d.trusted)
+	bind := core.BindHash(ip, r.UserAgent(), p.BindIP, p.BindUserAgent)
+	now := s.now()
+	var best *core.PassClaims
+	for _, c := range r.CookiesNamed(p.CookieName) {
+		var pc core.PassClaims
+		if d.pass.Verify(c.Value, &pc) != nil || pc.X || pc.E <= now.Unix() || pc.S != site.ID || pc.B != bind {
+			continue
+		}
+		if best == nil || pc.D > best.D {
+			best = &pc
+		}
+	}
+	if best == nil {
+		writeJSON(w, r, http.StatusUnauthorized, map[string]string{"error": "challenge_required"})
+		return
+	}
+	exp := min(best.E, now.Add(passCopyMinutes*time.Minute).Unix())
+	token := d.pass.Sign(core.PassClaims{D: best.D, E: exp, I: now.Unix(), B: bind, S: site.ID, X: true})
+	writeJSON(w, r, http.StatusOK, map[string]any{"token": token, "expires": exp, "header": PassHeader})
 }

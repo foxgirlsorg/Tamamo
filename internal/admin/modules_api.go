@@ -2,55 +2,139 @@ package admin
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
-	"github.com/tamamo/tamamo/internal/modules"
+	"github.com/foxgirlsorg/tamamo/internal/modules"
+	chpage "github.com/foxgirlsorg/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/module"
 )
 
-// previewModulesURL is where the admin API serves page modules' files for the
-// checking-page preview (see moduleFile).
-const previewModulesURL = "/assets/modules"
+// URLs under which the admin API serves modules' files. The web UI
+// container proxies everything below /assets/modules/ to the backend.
+const (
+	moduleKitURL    = "/assets/modules/kit"    // the UI kit (tamamo.css, tamamo.js)
+	moduleUIURL     = "/assets/modules/ui"     // + /<module id>/<file>: web UI pages
+	moduleStaticURL = "/assets/modules/static" // + /<module id>/<file>: files for the preview
+)
 
-// modulesDir returns the absolute <data>/modules directory, or "".
-func (h *handler) modulesDir() string {
-	if h.o.Assets == nil {
-		return ""
-	}
-	dir := filepath.Join(h.o.Assets.DataDir(), "modules")
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
-	return dir
+// moduleUIPolicy is sent with modules' web UI pages. They are shown in a
+// frame inside the web UI, on its origin: they may load their own files and
+// the kit and call the admin API, nothing else. Inline scripts are refused.
+const moduleUIPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; " +
+	"frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
+// availableModule describes one module compiled into this build.
+type availableModule struct {
+	module.Info
+	HasUI     bool `json:"has_ui"`
+	HasStatic bool `json:"has_static"`
 }
 
-// listModules answers GET /api/modules: the compiled-in Go modules, the page
-// module folders found on disk and where those folders live.
+// runningModule describes one enabled entry of the modules section.
+type runningModule struct {
+	Name   string   `json:"name"`
+	Module string   `json:"module"` // the registered ID it runs
+	Hooks  []string `json:"hooks"`
+	// Error is why the module's background work could not start, or "".
+	Error string `json:"error"`
+}
+
+// listModules answers GET /api/modules: the modules compiled into this build
+// (with their settings and pages) and the ones running right now.
 func (h *handler) listModules(w http.ResponseWriter, r *http.Request, _ ctxSession) {
-	dir := h.modulesDir()
-	pages, err := modules.ListPages(dir)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not list "+dir+": "+err.Error())
-		return
+	available := []availableModule{}
+	for _, info := range module.Registered() {
+		if info.Settings == nil {
+			info.Settings = []module.Field{}
+		}
+		if info.Pages == nil {
+			info.Pages = []module.Page{}
+		}
+		available = append(available, availableModule{Info: info, HasUI: info.UI != nil, HasStatic: info.Static != nil})
+	}
+	running := []runningModule{}
+	if h.o.Modules != nil {
+		for _, in := range h.o.Modules.Instances() {
+			running = append(running, runningModule{
+				Name: in.Cfg.Name, Module: in.Info.ID, Hooks: in.Hooks(), Error: in.StartError(),
+			})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"available":    modules.Available(),
-		"page_modules": pages,
-		"data_dir":     dir,
-		"modules_dir":  dir,
+		"available": available,
+		"running":   running,
+		"kit_url":   moduleKitURL,
+		"ui_url":    moduleUIURL,
 	})
 }
 
-// moduleFile serves GET /assets/modules/<name>/<file> so the preview can load
-// page modules' stylesheets, scripts and images. Admin-only content of any
-// folder under <data>/modules, enabled or not (the preview may show unsaved
-// settings).
-func (h *handler) moduleFile(w http.ResponseWriter, r *http.Request) {
+// moduleAPI hands /api/x/<name>/<rest> to the running module's AdminHandler,
+// with the path cut down to "/<rest>". The caller is signed in, and the
+// CSRF header was checked for anything but GET and HEAD.
+func (h *handler) moduleAPI(w http.ResponseWriter, r *http.Request, _ ctxSession) {
+	name := r.PathValue("name")
+	var in *modules.Instance
+	if h.o.Modules != nil {
+		in = h.o.Modules.Instance(name)
+	}
+	if in == nil {
+		writeError(w, http.StatusNotFound, "no module called "+name+" is running")
+		return
+	}
+	if in.Admin == nil {
+		writeError(w, http.StatusNotFound, "module "+name+" has no admin API")
+		return
+	}
+	modules.ServeStripped(w, r, "/"+r.PathValue("rest"), name, in.Admin.ServeAdmin)
+}
+
+// moduleKit serves the UI kit for modules' pages.
+func (h *handler) moduleKit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
+	modules.ServeFS(w, r, modules.Kit, r.PathValue("file"), false)
+}
+
+// moduleUI serves a file of a module's web UI pages (Info.UI) to a
+// signed-in admin.
+func (h *handler) moduleUI(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.currentSession(r); !ok {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, previewModulesURL+"/")
-	name, file, _ := strings.Cut(rest, "/")
-	modules.ServeFile(w, r, h.modulesDir(), name, file)
+	info, ok := module.Lookup(r.PathValue("id"))
+	if !ok || info.UI == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	hd := w.Header()
+	hd.Set("Content-Security-Policy", moduleUIPolicy)
+	hd.Set("X-Frame-Options", "SAMEORIGIN")
+	// A rebuilt module must show its new pages at once.
+	hd.Set("Cache-Control", "no-cache")
+	modules.ServeFS(w, r, info.UI, r.PathValue("file"), true)
+}
+
+// moduleStatic serves a module's static files (Info.Static) so the
+// checking-page preview can load them. Admin-only, enabled or not: the
+// preview may show unsaved settings.
+func (h *handler) moduleStatic(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.currentSession(r); !ok {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	info, ok := module.Lookup(r.PathValue("id"))
+	if !ok || info.Static == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	modules.ServeFS(w, r, info.Static, r.PathValue("file"), false)
+}
+
+// previewModules returns what the running modules add to the previewed page.
+func (h *handler) previewModules(site, host, state, lang string) []chpage.Module {
+	if h.o.Modules == nil {
+		return nil
+	}
+	return chpage.ExtendWith(h.o.Modules.Instances(),
+		module.PageRequest{Site: site, Host: host, State: state, Lang: lang, Preview: true}, moduleStaticURL)
 }

@@ -1,12 +1,12 @@
-package main
+package app
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/tamamo/tamamo/internal/admin"
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/admin"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 func TestEnvLogin(t *testing.T) {

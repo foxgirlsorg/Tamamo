@@ -3,7 +3,7 @@ package admin
 import (
 	"net/http"
 
-	"github.com/tamamo/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/config"
 )
 
 // rulesFileResponse is the rules part of tamamo.yaml, generated from

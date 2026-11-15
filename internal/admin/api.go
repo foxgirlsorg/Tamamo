@@ -13,11 +13,11 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
-	chpage "github.com/tamamo/tamamo/internal/page"
-	"github.com/tamamo/tamamo/internal/server"
-	"github.com/tamamo/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	chpage "github.com/foxgirlsorg/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/internal/server"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
 )
 
 // ---- state, setup, login ----------------------------------------------------
@@ -100,7 +100,7 @@ func (h *handler) checkLogin(username, password string) bool {
 }
 
 func (h *handler) login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := h.clientIP(r)
 	if d := h.limiter.blocked(ip); d > 0 {
 		secs := int(d.Seconds()) + 1
 		w.Header().Set("Retry-After", fmt.Sprint(secs))
@@ -268,22 +268,25 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request, _ ctxSession) 
 		host = "example.com"
 	}
 	var images map[string]string
+	var mascotCredit bool
 	if h.o.Assets != nil {
 		images = h.o.Assets.URLs("/assets/img")
+		mascotCredit = chpage.DefaultMascots(h.o.Assets.Custom())
 	}
 	data := chpage.Data{
-		State:      req.State,
-		Host:       host,
-		Preview:    true,
-		Token:      randomHex(16),
-		Random:     randomHex(16),
-		Difficulty: cfg.Protection.Difficulty,
-		Redirect:   "/",
-		VerifyURL:  "",
-		StaticURL:  "/assets/challenge",
-		Images:     images,
-		Lang:       lang,
-		Modules:    chpage.LoadModules(cfg.Modules, site, h.modulesDir(), previewModulesURL),
+		State:        req.State,
+		Host:         host,
+		Preview:      true,
+		Token:        randomHex(16),
+		Random:       randomHex(16),
+		Difficulty:   cfg.Protection.Difficulty,
+		Redirect:     "/",
+		VerifyURL:    "",
+		StaticURL:    "/assets/challenge",
+		Images:       images,
+		Lang:         lang,
+		Modules:      h.previewModules(site, host, req.State, lang),
+		MascotCredit: mascotCredit,
 	}
 	if req.State == "error" {
 		data.Message = ""
@@ -346,7 +349,7 @@ func (h *handler) deleteUpload(w http.ResponseWriter, r *http.Request, _ ctxSess
 // ---- account ----------------------------------------------------------------
 
 func (h *handler) password(w http.ResponseWriter, r *http.Request, s ctxSession) {
-	ip := clientIP(r)
+	ip := h.clientIP(r)
 	if d := h.limiter.blocked(ip); d > 0 {
 		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed attempts; try again in %s", humanDuration(int(d.Seconds())+1)))
 		return

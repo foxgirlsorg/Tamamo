@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tamamo/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/internal/modules"
+	"github.com/foxgirlsorg/tamamo/internal/page"
+	"github.com/foxgirlsorg/tamamo/module"
 )
 
 type proxyKey struct {
@@ -69,6 +72,15 @@ type ctxKey struct{}
 type proxyInfo struct {
 	clientIP   netip.Addr
 	cookieName string // the site's pass cookie, stripped before forwarding
+	mods       []*modules.Instance
+	req        *module.Request
+	// sharedPass: the site accepts passes of other sites in PassHeader.
+	sharedPass bool
+}
+
+// applies reports whether in's proxy hooks run for this request.
+func (pi *proxyInfo) applies(in *modules.Instance) bool {
+	return pi.req != nil && in.Cfg.AppliesTo(pi.req.Site)
 }
 
 // newProxy builds a reverse proxy for target, which is http(s)://host[:port][/path]
@@ -133,6 +145,46 @@ func (s *Server) newProxy(target string, insecure bool) (*cachedProxy, error) {
 				pr.Out.Header.Del("X-Real-IP")
 			}
 			stripCookie(pr.Out.Header, info.cookieName)
+			pr.Out.Header.Del(PassHeader)
+			for _, in := range info.mods {
+				if in.ReqMod == nil || !info.applies(in) {
+					continue
+				}
+				func() {
+					defer func() {
+						if p := recover(); p != nil {
+							slog.Error("module panicked in ModifyRequest", "module", in.Cfg.Name, "panic", p)
+						}
+					}()
+					in.ReqMod.ModifyRequest(pr.Out, info.req)
+				}()
+			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			info, _ := resp.Request.Context().Value(ctxKey{}).(*proxyInfo)
+			if info == nil {
+				return nil
+			}
+			// The app's answer to a browser's CORS question must name the
+			// pass header, or the browser won't send it.
+			if info.sharedPass && resp.Request.Method == http.MethodOptions && resp.Header.Get("Access-Control-Allow-Origin") != "" {
+				allowed := resp.Header.Get("Access-Control-Allow-Headers")
+				switch {
+				case allowed == "":
+					resp.Header.Set("Access-Control-Allow-Headers", PassHeader)
+				case allowed != "*" && !strings.Contains(strings.ToLower(allowed), strings.ToLower(PassHeader)):
+					resp.Header.Set("Access-Control-Allow-Headers", allowed+", "+PassHeader)
+				}
+			}
+			for _, in := range info.mods {
+				if in.RespMod == nil || !info.applies(in) {
+					continue
+				}
+				if err := modifyResponse(in, resp, info.req); err != nil {
+					return fmt.Errorf("module %s: %w", in.Cfg.Name, err)
+				}
+			}
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {
@@ -147,8 +199,19 @@ func (s *Server) newProxy(target string, insecure bool) (*cachedProxy, error) {
 	return &cachedProxy{rp: rp, transport: tr}, nil
 }
 
-// proxy forwards the request to target.
-func (s *Server) proxy(w http.ResponseWriter, r *http.Request, target string, ip netip.Addr, cookieName string) {
+// modifyResponse runs a module's ResponseModifier, turning a panic into an error.
+func modifyResponse(in *modules.Instance, resp *http.Response, req *module.Request) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("panic: %v", p)
+		}
+	}()
+	return in.RespMod.ModifyResponse(resp, req)
+}
+
+// proxy forwards the request to the decision's site.
+func (s *Server) proxy(w http.ResponseWriter, r *http.Request, dc *decision) {
+	target, ip, cookieName := dc.site.Target, dc.ip, dc.site.Protection.CookieName
 	cfg := s.mgr.Get()
 	rp, err := s.proxies.get(target, cfg.Server.InsecureSkipVerify)
 	if err != nil {
@@ -156,7 +219,7 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, target string, ip
 		s.render(w, r, http.StatusBadGateway, page.Data{State: "error", MessageID: "upstream_down"})
 		return
 	}
-	r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, &proxyInfo{clientIP: ip, cookieName: cookieName}))
+	r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, &proxyInfo{clientIP: ip, cookieName: cookieName, mods: dc.d.mods, req: dc.req, sharedPass: len(dc.site.Trusts) > 0}))
 	rp.ServeHTTP(w, r)
 }
 

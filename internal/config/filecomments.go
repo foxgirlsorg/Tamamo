@@ -34,6 +34,14 @@ var fileComments = map[string]string{
 	"protection.cookie_domain":           "Share the pass with subdomains, e.g. example.com. Empty: this host only.",
 	"protection.max_failures_per_minute": "Failed checks one IP may make per minute before it is refused\nfor a while. 0 = no limit.",
 
+	"protection.unprotected_paths":  "Pages that are never checked at all: no check, rate limit, webhook,\nmodule or rule runs for them. Patterns as in rules, e.g.\n  [/robots.txt, /.well-known/*, /favicon.ico]",
+	"protection.accept_passes_from": "Sites whose visitors need no second check here, by name. For an API on\nanother domain than its website: the page asks /.tamamo/api/pass for a\ntoken and sends it to the API in the X-Tamamo-Pass header.",
+	"protection.verified_bots":      "Check by reverse DNS that a visitor calling itself Googlebot, Bingbot,\nYandex, Baiduspider, Applebot, PetalBot or MojeekBot really is one.\nFakes get the action: block or challenge.",
+
+	"protection.bypass_headers": "Requests carrying one of these secret headers skip every check, e.g. an\nuptime monitor:\n  - {name: Monitor, header: X-Monitor-Token, value: a-long-random-secret}",
+	"protection.rate_limit":     "Limit how many requests one IP address may make. Past the limit the\naction applies: block or challenge.",
+	"protection.webhooks":       "Ask your own server about each request before the rules run. It gets a\nJSON POST and answers {\"action\": \"allow\" | \"challenge\" | \"block\" | \"\"}.\n  - {name: Reputation, enabled: true, url: http://checker:9000/check}",
+
 	"rules": `Rules, checked top to bottom; the first one that matches decides.
   action: allow | challenge | block
   difficulty: harder or easier check for this rule (0 = the usual one)
@@ -81,16 +89,16 @@ replace the rules above for that site.
       - name: Block everything
         action: block`,
 
-	"modules": `Extra checks and checking-page add-ons, run before the rules.
-  type: go       a module built into Tamamo (ratelimit, bypass-header)
-  type: webhook  asks your own server about each request (url, timeout_ms)
-  type: page     adds HTML/CSS to the checking page
-sites: [] runs it everywhere; otherwise list site names.
-  - name: Uptime monitor
+	"modules": `Modules: Go modules compiled into this build of Tamamo, run after the
+checks above and before the rules. Each entry switches one on.
+  name: your name for the entry (a-z, 0-9, dashes)
+  module: the module's ID, when it differs from the name
+  sites: [] runs it everywhere; otherwise list site names
+  on_error: continue | challenge | block, when the module's check fails
+  - name: geo
     enabled: true
-    type: go
-    module: bypass-header
-    settings: {header: X-Monitor-Token, value: a-long-random-secret}`,
+    settings: {countries: "KP, XX"}
+List what this build contains with:  tamamo -modules`,
 
 	"admin":               "The admin API that the optional web UI container talks to. It only runs\nwhen Tamamo is started with TAMAMO_ENABLE_API=true; without it, this file is\nthe only way to change settings.",
 	"admin.listen":        "Address of the admin API. In Docker it stays on the compose network: the\nweb UI container reaches it as tamamo:8081. Don't publish it to the internet.",

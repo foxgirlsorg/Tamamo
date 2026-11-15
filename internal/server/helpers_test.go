@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tamamo/tamamo/internal/assets"
-	"github.com/tamamo/tamamo/internal/config"
-	"github.com/tamamo/tamamo/internal/core"
-	"github.com/tamamo/tamamo/internal/stats"
+	"github.com/foxgirlsorg/tamamo/internal/assets"
+	"github.com/foxgirlsorg/tamamo/internal/config"
+	"github.com/foxgirlsorg/tamamo/internal/core"
+	"github.com/foxgirlsorg/tamamo/internal/stats"
 )
 
 const (
@@ -92,6 +92,7 @@ func fxNew(t *testing.T, mutate func(c *config.Config)) *fxEnv {
 		c.Server.IPSource = "remote"
 		c.Server.TrustedProxies = nil
 		c.Server.PreserveHost = false
+		c.Server.AuthEndpoints = "on"
 		c.Protection.Enabled = true
 		c.Protection.Difficulty = 1
 		c.Stats.Enabled = true

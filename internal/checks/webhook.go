@@ -1,4 +1,7 @@
-package modules
+// Package checks holds the request checks built into Tamamo that run before the
+// rules: the bypass headers, the rate limit and the webhooks. They are
+// configured in the protection settings.
+package checks
 
 import (
 	"bytes"
@@ -12,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/foxgirlsorg/tamamo/module"
 )
 
 // Webhook limits.
@@ -23,7 +28,7 @@ const (
 	webhookMaxResponse    = 64 << 10
 )
 
-// WebhookOptions configures a webhook module.
+// WebhookOptions configures a webhook.
 type WebhookOptions struct {
 	URL     string
 	Timeout time.Duration // 0 = DefaultWebhookTimeout
@@ -60,7 +65,8 @@ func CheckWebhookURL(raw string) error {
 	return nil
 }
 
-type webhook struct {
+// Webhook asks an HTTP endpoint about each request.
+type Webhook struct {
 	url     string
 	client  *http.Client
 	timeout time.Duration
@@ -73,15 +79,15 @@ type webhook struct {
 }
 
 type cachedDecision struct {
-	d   Decision
+	d   module.Decision
 	exp time.Time
 }
 
 var errRedirect = errors.New("webhook answered with a redirect")
 
 // NewWebhook creates a webhook checker. Errors (non-2xx answers, bad JSON,
-// timeouts) are returned to the caller, which applies the module's on_error.
-func NewWebhook(o WebhookOptions) (Checker, error) {
+// timeouts) are returned to the caller, which applies the webhook's on_error.
+func NewWebhook(o WebhookOptions) (*Webhook, error) {
 	if err := CheckWebhookURL(o.URL); err != nil {
 		return nil, err
 	}
@@ -99,7 +105,7 @@ func NewWebhook(o WebhookOptions) (Checker, error) {
 			},
 		}
 	}
-	return &webhook{
+	return &Webhook{
 		url: strings.TrimSpace(o.URL), client: c, timeout: o.Timeout, ttl: o.CacheTTL,
 		cookies: o.SendCookies, now: time.Now, cache: map[string]cachedDecision{},
 	}, nil
@@ -107,7 +113,7 @@ func NewWebhook(o WebhookOptions) (Checker, error) {
 
 var secretHeaders = map[string]bool{"Cookie": true, "Authorization": true, "Proxy-Authorization": true}
 
-func (wh *webhook) Check(ctx context.Context, r Request) (Decision, error) {
+func (wh *Webhook) Check(ctx context.Context, r *module.Request) (module.Decision, error) {
 	ip := ""
 	if r.IP.IsValid() {
 		ip = r.IP.String()
@@ -135,30 +141,30 @@ func (wh *webhook) Check(ctx context.Context, r Request) (Decision, error) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.url, bytes.NewReader(b))
 	if err != nil {
-		return Decision{}, err
+		return module.Decision{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Tamamo-Webhook/1")
 	resp, err := wh.client.Do(req)
 	if err != nil {
-		return Decision{}, err
+		return module.Decision{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, webhookMaxResponse))
-		return Decision{}, fmt.Errorf("webhook answered %s", resp.Status)
+		return module.Decision{}, fmt.Errorf("webhook answered %s", resp.Status)
 	}
-	var d Decision
+	var d module.Decision
 	if err := json.NewDecoder(io.LimitReader(resp.Body, webhookMaxResponse)).Decode(&d); err != nil {
-		return Decision{}, fmt.Errorf("webhook answer is not valid JSON: %w", err)
+		return module.Decision{}, fmt.Errorf("webhook answer is not valid JSON: %w", err)
 	}
 	d.Action = strings.ToLower(strings.TrimSpace(d.Action))
 	if d.Action == "continue" || d.Action == "none" {
-		d.Action = NoOpinion
+		d.Action = module.NoOpinion
 	}
-	if !ValidAction(d.Action) {
-		return Decision{}, fmt.Errorf("webhook answered with unknown action %q", d.Action)
+	if !module.ValidAction(d.Action) {
+		return module.Decision{}, fmt.Errorf("webhook answered with unknown action %q", d.Action)
 	}
 	if d.Difficulty < 0 || d.Difficulty > 8 {
 		d.Difficulty = 0
@@ -172,21 +178,21 @@ func (wh *webhook) Check(ctx context.Context, r Request) (Decision, error) {
 	return d, nil
 }
 
-func (wh *webhook) cached(key string) (Decision, bool) {
+func (wh *Webhook) cached(key string) (module.Decision, bool) {
 	wh.mu.Lock()
 	defer wh.mu.Unlock()
 	c, ok := wh.cache[key]
 	if !ok {
-		return Decision{}, false
+		return module.Decision{}, false
 	}
 	if !wh.now().Before(c.exp) {
 		delete(wh.cache, key)
-		return Decision{}, false
+		return module.Decision{}, false
 	}
 	return c.d, true
 }
 
-func (wh *webhook) store(key string, d Decision) {
+func (wh *Webhook) store(key string, d module.Decision) {
 	now := wh.now()
 	wh.mu.Lock()
 	defer wh.mu.Unlock()
