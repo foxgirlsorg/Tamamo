@@ -48,9 +48,14 @@
   /* ---------------------------------------------------------------- credit */
 
   var creditStyle = '';
+  // The optional mascot art credit ("· Art by ...") the server put in the
+  // footer. It is not part of the guarded text, but a rebuilt footer keeps it.
+  var artCredit = null;
   (function () {
     var f = doc.querySelector('footer.tm-credit');
     if (f) creditStyle = f.getAttribute('style') || '';
+    var art = f && f.querySelector('.tm-art');
+    if (art) artCredit = art.cloneNode(true);
     if (!creditStyle) {
       creditStyle = 'display:flex !important;align-items:center !important;justify-content:center !important;gap:6px !important;' +
         'visibility:visible !important;opacity:1 !important;position:relative !important;transform:none !important;' +
@@ -72,7 +77,16 @@
     strong.textContent = 'Tamamo';
     span.appendChild(strong);
     f.appendChild(span);
+    if (artCredit) f.appendChild(artCredit.cloneNode(true));
     return f;
+  }
+
+  // The footer's text without the art credit.
+  function creditText(f) {
+    var c = f.cloneNode(true);
+    var art = c.querySelectorAll('.tm-art');
+    for (var i = 0; i < art.length; i++) art[i].parentNode.removeChild(art[i]);
+    return (c.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
   function alpha(color) {
@@ -87,7 +101,7 @@
   function creditOK(f) {
     var body = doc.body;
     if (!f || !body || f.parentNode !== body) return false;
-    if ((f.textContent || '').replace(/\s+/g, ' ').trim() !== CREDIT_TEXT) return false;
+    if (creditText(f) !== CREDIT_TEXT) return false;
     if (f.getAttribute('style') !== creditStyle) return false;
     var r = f.getBoundingClientRect();
     if (r.width < 60 || r.height < 12) return false;
